@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'constants/app_colors.dart';
 import 'screens/home_screen.dart';
 import 'screens/nearby_screen.dart';
 import 'screens/camera_screen.dart';
@@ -16,8 +17,26 @@ class NowfieldApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'NOWFIELD',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: AppColors.background,
+        colorScheme: const ColorScheme.dark(
+          primary: AppColors.primary,
+          secondary: AppColors.accent,
+          surface: AppColors.card,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: AppColors.background,
+          elevation: 0,
+          centerTitle: true,
+          titleTextStyle: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: AppColors.textPrimary,
+            fontSize: 18,
+          ),
+          iconTheme: IconThemeData(color: AppColors.textPrimary),
+        ),
         useMaterial3: true,
       ),
       home: const MainScreen(),
@@ -52,50 +71,55 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.background,
       body: _widgetOptions.elementAt(_selectedIndex),
-      bottomNavigationBar: Theme(
-        data: Theme.of(context).copyWith(
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          border: Border(
+            top: BorderSide(
+              color: AppColors.cardBorder.withOpacity(0.35),
+              width: 0.8,
+            ),
+          ),
         ),
         child: BottomNavigationBar(
           type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.black,
+          backgroundColor: AppColors.background,
           items: const <BottomNavigationBarItem>[
             BottomNavigationBarItem(
               icon: Icon(Icons.home_outlined),
               activeIcon: Icon(Icons.home),
-              label: 'Home',
+              label: '홈',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.location_on_outlined),
               activeIcon: Icon(Icons.location_on),
-              label: 'Nearby',
+              label: '내 주변',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.add_box_outlined, size: 32),
-              activeIcon: Icon(Icons.add_box, size: 32),
-              label: 'Camera',
+              icon: Icon(Icons.add_box_outlined, size: 30),
+              activeIcon: Icon(Icons.add_box, size: 30),
+              label: '촬영',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.notifications_outlined),
               activeIcon: Icon(Icons.notifications),
-              label: 'Alerts',
+              label: '알림',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.person_outline),
               activeIcon: Icon(Icons.person),
-              label: 'Profile',
+              label: '프로필',
             ),
           ],
           currentIndex: _selectedIndex,
-          selectedItemColor: Colors.white,
+          selectedItemColor: AppColors.accent,
           unselectedItemColor: Colors.white54,
           showSelectedLabels: true,
           showUnselectedLabels: true,
-          selectedFontSize: 10,
-          unselectedFontSize: 10,
+          selectedFontSize: 11,
+          unselectedFontSize: 11,
           onTap: _onItemTapped,
         ),
       ),
