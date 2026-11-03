@@ -18,29 +18,130 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="NOWFIELD - News from the Field">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="nowfield_app">
+  <meta name="apple-mobile-web-app-title" content="NOWFIELD">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>nowfield_app</title>
+  <title>NOWFIELD</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Kakao Maps JavaScript SDK -->
+  <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=6209fa5c2248588c9cd5a13395fdd87d&libraries=services,clusterer"></script>
+
+  <!-- Kakao Maps Bridge Helper -->
+  <script type="text/javascript">
+    window.kakaoMapInstances = {};
+    window.initKakaoMap = function(containerId, lat, lng, level) {
+      if (!window.kakao || !window.kakao.maps) {
+        console.warn("[KakaoMap] SDK is not loaded or authorized.");
+        return false;
+      }
+      var container = document.getElementById(containerId);
+      if (!container) return false;
+
+      var centerPos = new kakao.maps.LatLng(lat || 37.5250, lng || 127.0250);
+      var map = new kakao.maps.Map(container, {
+        center: centerPos,
+        level: level || 4
+      });
+      window.kakaoMapInstances[containerId] = map;
+
+      // 1. Naver-style User Location Overlay
+      var userWrapper = document.createElement('div');
+      userWrapper.innerHTML = `
+        <div style="position:relative;width:68px;height:68px;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+          <div style="position:absolute;width:64px;height:64px;border-radius:50%;background:radial-gradient(circle, rgba(41,108,242,0.38) 20%, rgba(41,108,242,0.08) 65%, transparent 100%);"></div>
+          <!-- Centered rotating container around circle center (34, 34) -->
+          <div style="position:absolute;width:68px;height:68px;display:flex;align-items:center;justify-content:center;transform:rotate(35deg);transform-origin:center center;">
+            <svg width="12" height="12" viewBox="0 0 12 12" style="position:absolute;top:15px;">
+              <polygon points="6,0 12,12 6,8.5 0,12" fill="#296CF2" />
+            </svg>
+          </div>
+          <div style="position:relative;z-index:2;width:17px;height:17px;border-radius:50%;background:#296CF2;border:2.5px solid #FFFFFF;box-shadow:0 1px 4px rgba(0,0,0,0.35);"></div>
+        </div>
+      `;
+      var userOverlay = new kakao.maps.CustomOverlay({
+        position: centerPos,
+        content: userWrapper,
+        yAnchor: 0.5,
+        xAnchor: 0.5
+      });
+      userOverlay.setMap(map);
+
+      // 2. Function to add pins (clears previous overlays first)
+      window.kakaoPinOverlays = window.kakaoPinOverlays || [];
+      window.renderKakaoPins = function(pins) {
+        if (window.kakaoPinOverlays && window.kakaoPinOverlays.length > 0) {
+          window.kakaoPinOverlays.forEach(function(ov) {
+            ov.setMap(null);
+          });
+          window.kakaoPinOverlays = [];
+        }
+        if (!pins || !Array.isArray(pins)) return;
+        pins.forEach(function(pin) {
+          var pos = new kakao.maps.LatLng(pin.lat, pin.lng);
+          var pinEl = document.createElement('div');
+          if (pin.isStacked) {
+            // 3-Stack pin (100m~200m clustered videos)
+            pinEl.innerHTML = `
+              <div style="cursor:pointer;position:relative;width:56px;height:48px;filter:drop-shadow(0 2px 5px rgba(0,0,0,0.45));">
+                <div style="position:absolute;top:0;right:0;width:44px;height:38px;">
+                  <svg width="44" height="38" viewBox="0 0 44 38">
+                    <path d="M7,0 L37,0 C40.8,0 44,3.1 44,7 L44,23 C44,26.8 40.8,30 37,30 L32,30 L28,38 L24,30 L7,30 C3.1,30 0,26.8 0,23 L0,7 C0,3.1 3.1,0 7,0 Z" fill="#F8FAFC" stroke="#000000" stroke-width="2.6" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+                <div style="position:absolute;top:4px;right:4px;width:44px;height:38px;">
+                  <svg width="44" height="38" viewBox="0 0 44 38">
+                    <path d="M7,0 L37,0 C40.8,0 44,3.1 44,7 L44,23 C44,26.8 40.8,30 37,30 L32,30 L28,38 L24,30 L7,30 C3.1,30 0,26.8 0,23 L0,7 C0,3.1 3.1,0 7,0 Z" fill="#F1F5F9" stroke="#000000" stroke-width="2.6" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+                <div style="position:absolute;top:8px;right:8px;width:44px;height:38px;">
+                  <svg width="44" height="38" viewBox="0 0 44 38">
+                    <path d="M7,0 L37,0 C40.8,0 44,3.1 44,7 L44,23 C44,26.8 40.8,30 37,30 L32,30 L28,38 L24,30 L7,30 C3.1,30 0,26.8 0,23 L0,7 C0,3.1 3.1,0 7,0 Z" fill="#FFFFFF" stroke="#000000" stroke-width="2.8" stroke-linejoin="round"/>
+                    <polygon points="17,11 28,17 17,23" fill="#000000"/>
+                  </svg>
+                </div>
+              </div>
+            `;
+          } else {
+            // Single pin
+            pinEl.innerHTML = `
+              <div style="cursor:pointer;width:44px;height:38px;filter:drop-shadow(0 2px 5px rgba(0,0,0,0.45));">
+                <svg width="44" height="38" viewBox="0 0 44 38">
+                  <path d="M7,0 L37,0 C40.8,0 44,3.1 44,7 L44,23 C44,26.8 40.8,30 37,30 L32,30 L28,38 L24,30 L7,30 C3.1,30 0,26.8 0,23 L0,7 C0,3.1 3.1,0 7,0 Z" fill="#FFFFFF" stroke="#000000" stroke-width="2.8" stroke-linejoin="round"/>
+                  <polygon points="17,11 28,17 17,23" fill="#000000"/>
+                </svg>
+              </div>
+            `;
+          }
+          pinEl.onclick = function() {
+            if (window.onKakaoPinClicked) {
+              window.onKakaoPinClicked(pin.id, pin.title, pin.isStacked);
+            }
+          };
+          var overlay = new kakao.maps.CustomOverlay({
+            position: pos,
+            content: pinEl,
+            yAnchor: 1.0,
+            xAnchor: 0.65
+          });
+          overlay.setMap(map);
+          window.kakaoPinOverlays.push(overlay);
+        });
+      };
+
+      return true;
+    };
+  </script>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
-
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
