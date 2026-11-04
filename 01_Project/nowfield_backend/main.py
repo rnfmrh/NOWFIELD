@@ -34,12 +34,13 @@ Base.metadata.create_all(bind=engine)
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Seed initial data into SQLite DB
-    db = next(get_db())
-    try:
-        await crud.seed_initial_db(db)
-    finally:
-        db.close()
+    # Startup: Seed initial data into SQLite DB (skip with NOWFIELD_NO_SEED=1)
+    if not os.environ.get("NOWFIELD_NO_SEED"):
+        db = next(get_db())
+        try:
+            await crud.seed_initial_db(db)
+        finally:
+            db.close()
     yield
 
 app = FastAPI(
