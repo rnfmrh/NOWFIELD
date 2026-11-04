@@ -142,8 +142,8 @@ class CommentResponse(BaseModel):
 class UserProfileSummaryResponse(BaseModel):
     user: UserResponse
     video_count: int
-    follower_count: int = 128
-    following_count: int = 42
+    follower_count: int = 0
+    following_count: int = 0
     is_following: bool = False
     total_license_sales: int = 0
     total_creator_revenue: int = 0
