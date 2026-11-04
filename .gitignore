@@ -5,22 +5,45 @@ __pycache__/
 venv/
 *.db
 
-# Flutter
+# Flutter/Dart/Pub
 .dart_tool/
 .packages
+.pub-cache/
+.pub/
 build/
 .flutter-plugins
 .flutter-plugins-dependencies
-*.iml
+**/doc/api/
+**/ios/Flutter/.last_build_id
+/coverage/
+app.*.symbols
+app.*.map.json
+
+# Android
+/android/app/debug
+/android/app/profile
+/android/app/release
 
 # IDE
 .idea/
 .vscode/
+*.iml
+*.ipr
+*.iws
+.atom/
+
+# Miscellaneous
+*.class
+*.log
 *.swp
 *.swo
-
-# OS
 .DS_Store
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
 Thumbs.db
 
 # Uploads
