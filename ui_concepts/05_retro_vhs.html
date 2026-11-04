@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>05 - Retro VHS</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+  body { margin: 0; padding: 0; background-color: #222; display: flex; justify-content: center; font-family: 'VT323', monospace; }
+  .phone { width: 375px; height: 812px; position: relative; background: #000; margin-top: 20px; overflow: hidden; }
+  .video-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; filter: sepia(0.3) blur(0.5px) contrast(1.2); }
+  .vhs-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+  .rec-indicator { position: absolute; top: 30px; left: 20px; color: #ff0000; font-size: 24px; display: flex; align-items: center; gap: 8px; text-shadow: 2px 2px 0 #000; }
+  .rec-dot { width: 12px; height: 12px; background: #ff0000; border-radius: 50%; animation: blink 1s infinite; }
+  @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+  .datetime { position: absolute; bottom: 120px; left: 20px; color: #fff; font-size: 24px; text-shadow: 2px 2px 0 #000; }
+  .info { position: absolute; bottom: 80px; left: 20px; color: #fff; font-size: 20px; text-shadow: 2px 2px 0 #000; }
+  .actions { position: absolute; right: 20px; bottom: 80px; display: flex; flex-direction: column; gap: 15px; }
+  .action-btn { color: #fff; font-size: 24px; text-shadow: 2px 2px 0 #000; cursor: pointer; }
+  .nav { position: absolute; bottom: 0; width: 100%; height: 60px; background: rgba(0,0,0,0.8); display: flex; justify-content: space-around; align-items: center; border-top: 2px dashed #fff; }
+  .nav-item { color: #888; font-size: 20px; }
+  .nav-item.active { color: #fff; text-shadow: 2px 2px 0 #000; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <img class="video-bg" src="https://picsum.photos/seed/vhs/400/800" alt="bg">
+  <div class="rec-indicator"><div class="rec-dot"></div> PLAY</div>
+  
+  <div class="actions">
+    <div class="action-btn">VOTE</div>
+    <div class="action-btn">MSG</div>
+    <div class="action-btn">BUY</div>
+  </div>
+  
+  <div class="datetime">SEP.22.2026 PM 08:31</div>
+  <div class="info">SEOUL_STATION / @USER</div>
+  
+  <div class="nav">
+    <div class="nav-item active">CH.1</div>
+    <div class="nav-item">CH.2</div>
+    <div class="nav-item" style="color:#ff0000;">REC</div>
+    <div class="nav-item">CH.4</div>
+    <div class="nav-item">CH.5</div>
+  </div>
+</div>
+</body>
+</html>

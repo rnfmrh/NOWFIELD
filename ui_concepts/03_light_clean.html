@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>03 - Light Clean</title>
+<style>
+  body { margin: 0; padding: 0; background-color: #f8f9fa; display: flex; justify-content: center; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+  .phone { width: 375px; height: 812px; position: relative; background: #fff; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border-radius: 40px; margin-top: 20px; overflow: hidden; display: flex; flex-direction: column; }
+  .header { padding: 40px 20px 10px; font-size: 24px; font-weight: 800; color: #111; letter-spacing: -0.5px; border-bottom: 1px solid #eee; }
+  .video-container { flex: 1; margin: 16px; border-radius: 20px; overflow: hidden; position: relative; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+  .video-bg { width: 100%; height: 100%; object-fit: cover; }
+  .info-bar { position: absolute; bottom: 0; width: 100%; padding: 20px; background: linear-gradient(to top, rgba(0,0,0,0.6), transparent); color: #fff; box-sizing: border-box; }
+  .title { font-size: 16px; font-weight: 600; line-height: 1.4; }
+  .metadata { font-size: 12px; margin-top: 6px; color: #ddd; display: flex; align-items: center; gap: 8px; }
+  .actions-row { display: flex; justify-content: space-between; padding: 12px 24px; border-top: 1px solid #eee; }
+  .action-item { display: flex; align-items: center; gap: 6px; color: #555; font-weight: 600; font-size: 14px; }
+  .nav { height: 60px; background: #fff; display: flex; justify-content: space-around; align-items: center; border-top: 1px solid #eee; padding-bottom: 10px; }
+  .nav-item { font-size: 24px; color: #ccc; }
+  .nav-item.active { color: #000; }
+  .btn-primary { background: #000; color: #fff; border-radius: 50%; width: 44px; height: 44px; display: flex; justify-content: center; align-items: center; font-size: 24px; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="header">NOWFIELD</div>
+  <div class="video-container">
+    <img class="video-bg" src="https://picsum.photos/seed/light/400/600" alt="bg">
+    <div class="info-bar">
+      <div class="title">Morning coffee at the new downtown cafe ☕️</div>
+      <div class="metadata">
+        <span>@cafe_lover</span> • <span>Just now</span>
+      </div>
+    </div>
+  </div>
+  <div class="actions-row">
+    <div class="action-item"><span>🤍</span> 1.2k</div>
+    <div class="action-item"><span>💬</span> 48</div>
+    <div class="action-item"><span>🔖</span> License</div>
+  </div>
+  <div class="nav">
+    <div class="nav-item active">🏠</div>
+    <div class="nav-item">📍</div>
+    <div class="btn-primary">＋</div>
+    <div class="nav-item">🔔</div>
+    <div class="nav-item">👤</div>
+  </div>
+</div>
+</body>
+</html>

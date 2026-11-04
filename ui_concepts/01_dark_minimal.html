@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>01 - Dark Minimalist</title>
+<style>
+  body { margin: 0; padding: 0; background-color: #000; color: #fff; font-family: -apple-system, sans-serif; display: flex; justify-content: center; }
+  .phone { width: 375px; height: 812px; background: #111; position: relative; overflow: hidden; }
+  .video-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.8; }
+  .overlay { position: absolute; bottom: 0; width: 100%; padding: 20px; box-sizing: border-box; background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); }
+  .title { font-size: 20px; font-weight: bold; margin-bottom: 8px; }
+  .user { font-size: 14px; color: #ccc; margin-bottom: 4px; }
+  .location { font-size: 12px; color: #aaa; }
+  .actions { position: absolute; right: 10px; bottom: 100px; display: flex; flex-direction: column; gap: 20px; align-items: center; }
+  .action-btn { width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 20px; }
+  .nav { position: absolute; bottom: 0; width: 100%; height: 60px; background: #000; display: flex; justify-content: space-around; align-items: center; }
+  .nav-item { font-size: 24px; color: #666; }
+  .nav-item.active { color: #fff; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <img class="video-bg" src="https://picsum.photos/seed/darkmin/400/800" alt="bg">
+  <div class="actions">
+    <div class="action-btn">🤍</div>
+    <div class="action-btn">💬</div>
+    <div class="action-btn">🔗</div>
+  </div>
+  <div class="overlay">
+    <div class="title">Seoul Station is crowded!</div>
+    <div class="user">@seoul_walker</div>
+    <div class="location">📍 Seoul · 3 min ago</div>
+  </div>
+  <div class="nav">
+    <div class="nav-item active">🏠</div>
+    <div class="nav-item">📍</div>
+    <div class="nav-item" style="font-size:32px;">📷</div>
+    <div class="nav-item">🔔</div>
+    <div class="nav-item">👤</div>
+  </div>
+</div>
+</body>
+</html>
