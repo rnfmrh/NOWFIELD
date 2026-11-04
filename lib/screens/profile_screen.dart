@@ -962,6 +962,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         _showPolicyInfoDialog(parentContext);
                       },
                     ),
+                    const Divider(color: Colors.white12),
+
+                    // Developer: API Server URL
+                    ListTile(
+                      leading: const Icon(Icons.dns_outlined, color: AppColors.textMuted),
+                      title: const Text(
+                        'API 서버 주소',
+                        style: TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
+                      ),
+                      subtitle: Text(
+                        ApiService.baseUrl,
+                        style: const TextStyle(color: AppColors.accent, fontSize: 11.5),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: const Icon(Icons.edit_outlined, color: AppColors.textMuted, size: 20),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _showApiUrlDialog(parentContext);
+                      },
+                    ),
 
                     if (currentUser != null) ...[
                       const Divider(color: Colors.white12),
@@ -1005,6 +1026,109 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
             );
           },
+        );
+      },
+    );
+  }
+
+  void _showApiUrlDialog(BuildContext parentContext) {
+    final controller = TextEditingController(text: ApiService.baseUrl);
+    final presets = [
+      ApiService.defaultBaseUrl,
+      'http://127.0.0.1:8000',
+      'http://10.0.2.2:8000',
+    ];
+
+    showDialog(
+      context: parentContext,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: const Text(
+            'API 서버 주소 변경',
+            style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'https://example.com',
+                  hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                  filled: true,
+                  fillColor: AppColors.background,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.clear, color: AppColors.textMuted, size: 18),
+                    onPressed: () => controller.clear(),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '프리셋',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 6),
+              ...presets.map((url) => InkWell(
+                onTap: () => controller.text = url,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        url == ApiService.baseUrl ? Icons.radio_button_checked : Icons.radio_button_off,
+                        color: url == ApiService.baseUrl ? AppColors.accent : AppColors.textMuted,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          url,
+                          style: TextStyle(
+                            color: url == ApiService.baseUrl ? AppColors.accent : AppColors.textPrimary,
+                            fontSize: 12,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('취소', style: TextStyle(color: AppColors.textMuted)),
+            ),
+            TextButton(
+              onPressed: () {
+                final newUrl = controller.text.trim();
+                if (newUrl.isNotEmpty) {
+                  ApiService.setBaseUrl(newUrl);
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(parentContext).showSnackBar(
+                    SnackBar(
+                      content: Text('API 서버 주소가 변경되었습니다:\n${ApiService.baseUrl}'),
+                      backgroundColor: AppColors.card,
+                    ),
+                  );
+                }
+              },
+              child: const Text('적용', style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold)),
+            ),
+          ],
         );
       },
     );

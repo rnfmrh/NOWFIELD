@@ -3,8 +3,19 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  // Use 10.0.2.2 for Android emulator, localhost for Web/iOS
-  static const String baseUrl = 'http://127.0.0.1:8000';
+  static const String defaultBaseUrl = 'https://nothing-cash-spoke-burns.trycloudflare.com';
+
+  static final ValueNotifier<String> baseUrlNotifier =
+      ValueNotifier<String>(defaultBaseUrl);
+
+  static String get baseUrl => baseUrlNotifier.value;
+
+  static void setBaseUrl(String url) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return;
+    final normalized = trimmed.endsWith('/') ? trimmed.substring(0, trimmed.length - 1) : trimmed;
+    baseUrlNotifier.value = normalized;
+  }
 
   /// Active logged-in user state (defaults to @seoul_walker per Spec #1 auto-login)
   static final ValueNotifier<Map<String, dynamic>?> currentUserNotifier =
