@@ -67,8 +67,8 @@ def get_user_profile_summary(
 
     db_followers = db.query(models.UserFollow).filter(models.UserFollow.following_id == resolved_id).count()
     db_following = db.query(models.UserFollow).filter(models.UserFollow.follower_id == resolved_id).count()
-    base_followers = 128 if resolved_id == "u_seoul_walker" else 64
-    base_following = 42 if resolved_id == "u_seoul_walker" else 28
+    base_followers = 0
+    base_following = 0
 
     is_following = False
     if viewer_id and viewer_id != resolved_id:
@@ -117,12 +117,54 @@ def toggle_user_follow(db: Session, target_user_id: str, follower_id: str) -> Op
 
     db.commit()
     db_followers = db.query(models.UserFollow).filter(models.UserFollow.following_id == resolved_target_id).count()
-    base_followers = 128 if resolved_target_id == "u_seoul_walker" else 64
+    base_followers = 0
     return schemas.FollowToggleResponse(
         target_user_id=resolved_target_id,
         following=following,
         follower_count=base_followers + db_followers,
     )
+
+
+def get_followers(db: Session, user_id: str) -> List[dict]:
+    user = get_user(db, user_id)
+    resolved_id = user.id if user else user_id
+    follows = (
+        db.query(models.UserFollow)
+        .filter(models.UserFollow.following_id == resolved_id)
+        .order_by(desc(models.UserFollow.created_at))
+        .all()
+    )
+    result = []
+    for f in follows:
+        u = get_user(db, f.follower_id)
+        result.append({
+            "user_id": f.follower_id,
+            "username": u.username if u else f"@{f.follower_id}",
+            "profile_image": u.profile_image if u else None,
+            "followed_at": f.created_at.isoformat() if f.created_at else "",
+        })
+    return result
+
+
+def get_following(db: Session, user_id: str) -> List[dict]:
+    user = get_user(db, user_id)
+    resolved_id = user.id if user else user_id
+    follows = (
+        db.query(models.UserFollow)
+        .filter(models.UserFollow.follower_id == resolved_id)
+        .order_by(desc(models.UserFollow.created_at))
+        .all()
+    )
+    result = []
+    for f in follows:
+        u = get_user(db, f.following_id)
+        result.append({
+            "user_id": f.following_id,
+            "username": u.username if u else f"@{f.following_id}",
+            "profile_image": u.profile_image if u else None,
+            "followed_at": f.created_at.isoformat() if f.created_at else "",
+        })
+    return result
 
 
 def search_videos_and_users(
@@ -593,6 +635,48 @@ async def seed_initial_db(db: Session):
         db.add(video)
 
     db.commit()
+
+
+def get_video_angles(
+    db: Session,
+    video_id: str,
+    radius_km: float = 1.0,
+) -> List[schemas.VideoResponse]:
+    video = get_video_by_id(db, video_id)
+    if not video:
+        return []
+    all_public = (
+        db.query(models.Video)
+        .filter(models.Video.status == "public", models.Video.id != video_id)
+        .order_by(desc(models.Video.created_at))
+        .limit(100)
+        .all()
+    )
+    results: List[schemas.VideoResponse] = []
+    for v in all_public:
+        dist_m = haversine_distance_meters(video.latitude, video.longitude, v.latitude, v.longitude)
+        if dist_m <= radius_km * 1000.0:
+            resp = schemas.VideoResponse.model_validate(v)
+            resp.uploader_name = v.uploader.username if v.uploader else "@anonymous"
+            results.append(resp)
+    return results
+
+
+def delete_video(db: Session, video_id: str, requester_id: str) -> bool:
+    video = get_video_by_id(db, video_id)
+    if not video:
+        return False
+    if video.uploader_id != requester_id:
+        user = get_user(db, requester_id)
+        if not user or user.id != video.uploader_id:
+            return False
+    db.query(models.VideoLike).filter(models.VideoLike.video_id == video_id).delete(synchronize_session=False)
+    db.query(models.Comment).filter(models.Comment.video_id == video_id).delete(synchronize_session=False)
+    db.query(models.Report).filter(models.Report.video_id == video_id).delete(synchronize_session=False)
+    db.query(models.LicenseTransaction).filter(models.LicenseTransaction.video_id == video_id).delete(synchronize_session=False)
+    db.delete(video)
+    db.commit()
+    return True
 
 
 def delete_user_account(db: Session, user_id: str) -> bool:

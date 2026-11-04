@@ -1,4 +1,5 @@
 import os
+import json
 import contextlib
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Depends, Query, File, Form, UploadFile
@@ -13,17 +14,33 @@ import crud
 from kakao_service import kakao_service, fuzz_coordinates
 from video_service import UPLOAD_DIR, VideoProcessor, MAX_DURATION_SECONDS
 
+SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "admin_settings.json")
+DEFAULT_SETTINGS = {
+    "angles_radius_km": 1.0,
+}
+
+def _load_settings() -> dict:
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            return {**DEFAULT_SETTINGS, **json.load(f)}
+    return dict(DEFAULT_SETTINGS)
+
+def _save_settings(data: dict):
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 # Create SQLite database tables if they do not exist
 Base.metadata.create_all(bind=engine)
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Seed initial data into SQLite DB
-    db = next(get_db())
-    try:
-        await crud.seed_initial_db(db)
-    finally:
-        db.close()
+    # Startup: Seed initial data into SQLite DB (skip with NOWFIELD_NO_SEED=1)
+    if not os.environ.get("NOWFIELD_NO_SEED"):
+        db = next(get_db())
+        try:
+            await crud.seed_initial_db(db)
+        finally:
+            db.close()
     yield
 
 app = FastAPI(
@@ -146,6 +163,14 @@ def toggle_follow(
     if not result:
         raise HTTPException(status_code=404, detail="Target user not found")
     return result
+
+@app.get("/users/{user_id}/followers")
+def get_user_followers(user_id: str, db: Session = Depends(get_db)):
+    return crud.get_followers(db, user_id)
+
+@app.get("/users/{user_id}/following")
+def get_user_following(user_id: str, db: Session = Depends(get_db)):
+    return crud.get_following(db, user_id)
 
 @app.get("/users/{user_id}", response_model=schemas.UserResponse)
 def get_user_profile(user_id: str, db: Session = Depends(get_db)):
@@ -315,6 +340,37 @@ def get_home_feed(
     Supports Spec #6 tabs: Recommended, Latest, Following.
     """
     return crud.get_feed_videos(db, limit, offset, tab=tab, viewer_id=viewer_id)
+
+@app.get("/videos/{video_id}/angles", response_model=List[schemas.VideoResponse])
+def get_video_angles(
+    video_id: str,
+    radius_km: Optional[float] = Query(None, description="Search radius in km (uses admin setting if omitted)"),
+    db: Session = Depends(get_db)
+):
+    effective_radius = radius_km if radius_km is not None else _load_settings().get("angles_radius_km", 1.0)
+    return crud.get_video_angles(db, video_id, effective_radius)
+
+@app.get("/admin/settings")
+def get_admin_settings():
+    return _load_settings()
+
+@app.put("/admin/settings")
+def update_admin_settings(updates: dict):
+    settings = _load_settings()
+    settings.update(updates)
+    _save_settings(settings)
+    return settings
+
+@app.delete("/videos/{video_id}")
+def delete_video(
+    video_id: str,
+    requester_id: str = Query("u_seoul_walker", description="ID of the user requesting deletion"),
+    db: Session = Depends(get_db)
+):
+    ok = crud.delete_video(db, video_id, requester_id)
+    if not ok:
+        raise HTTPException(status_code=403, detail="Video not found or not owned by requester")
+    return {"deleted": True, "video_id": video_id}
 
 @app.delete("/users/{user_id}")
 def delete_account(user_id: str, db: Session = Depends(get_db)):
