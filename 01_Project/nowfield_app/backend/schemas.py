@@ -2,6 +2,30 @@ from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
+# --- Creator Support Account Schemas (CR-01) ---
+
+class SupportAccountUpsert(BaseModel):
+    provider: str = Field(default="kofi", description="kofi, buymeacoffee, paypal")
+    support_url: str = Field(..., description="Public HTTPS creator support page URL")
+
+class SupportAccountResponse(BaseModel):
+    id: str
+    user_id: str
+    provider: str
+    support_url: str
+    ownership_status: str  # verified, pending, unverified, disconnected
+    verified_at: Optional[datetime] = None
+    active: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+class SupportClickResponse(BaseModel):
+    video_id: str
+    support_url: Optional[str] = None
+    provider: Optional[str] = None
+    click_count: int
+    platform_fee_percent: int = 0
+
 # --- User Schemas ---
 
 class UserBase(BaseModel):
@@ -16,11 +40,13 @@ class UserCreate(UserBase):
 
 class UserResponse(UserBase):
     id: str
+    exact_location_consent: bool = False
+    exact_location_consented_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
-# --- Video Schemas ---
+# --- Video Schemas (CR-01, CR-02, CR-03) ---
 
 class VideoCreate(BaseModel):
     uploader_id: str
@@ -32,9 +58,39 @@ class VideoCreate(BaseModel):
     longitude: float
     duration_sec: int = Field(default=60, le=60)  # Max 60 seconds
     is_original_capture: bool = True
-    license_price: int = 10000
+    # CR-01: Video-level support button toggle
+    support_enabled: bool = False
+    # CR-02: Location display mode & consent
+    location_display_mode: str = Field(default="exact", description="exact, approximate, hidden")
+    exact_location_consented: bool = False
+    precise_permission_granted: bool = True
+    is_sensitive_place: bool = False
+    accuracy_m: Optional[float] = 10.0
+    # CR-03: Capture timestamp & display timezone
+    captured_at: Optional[datetime] = None
+    display_timezone: str = "Asia/Seoul"
+    capture_session_id: Optional[str] = None
+
+
+class VideoSettingsUpdate(BaseModel):
+    """
+    Spec v1.1 Principle 8 (Privacy by Choice) & CR-01/CR-02:
+    Allows creator to update per-video support_enabled and location_display_mode at any time.
+    """
+    requester_id: Optional[str] = "u_seoul_walker"
+    support_enabled: Optional[bool] = None
+    location_display_mode: Optional[str] = Field(
+        default=None, description="exact, approximate, hidden"
+    )
+    exact_location_consented: Optional[bool] = None
+    precise_permission_granted: bool = True
+    is_sensitive_place: bool = False
 
 class VideoResponse(BaseModel):
+    """
+    CR-02: General user API response NEVER returns capture_lat/capture_lng raw coordinates!
+    Only returns display_lat/display_lng according to location_display_mode (None when hidden).
+    """
     id: str
     uploader_id: str
     uploader_name: Optional[str] = None
@@ -47,15 +103,32 @@ class VideoResponse(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     subtitles_json: Optional[str] = None
-    # Note: Precise latitude and longitude are omitted or fuzzed in public responses!
-    fuzzed_lat: float
-    fuzzed_lng: float
+
+    # CR-02: Public Location Information
+    location_display_mode: str = "exact"   # exact, approximate, hidden
+    location_privacy_label: str = "정확한 위치"  # 정확한 위치 | 약 100~200m 범위 | 위치 미표시
+    display_lat: Optional[float] = None
+    display_lng: Optional[float] = None
+    fuzzed_lat: Optional[float] = None
+    fuzzed_lng: Optional[float] = None
+    approx_radius_m: Optional[int] = None
     location_name: str
     status: str
     is_original_capture: bool
-    license_price: int
+
+    # CR-01: Creator Support (License fields removed)
+    support_enabled: bool = False
+    creator_support_url: Optional[str] = None
+    creator_support_provider: Optional[str] = None
+    support_click_count: int = 0
+
     like_count: int
     comment_count: int
+
+    # CR-03: Absolute Published Timestamp vs Capture Timestamp
+    published_at: datetime
+    captured_at: Optional[datetime] = None
+    display_timezone: str = "Asia/Seoul"
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -73,28 +146,10 @@ class NearbyResponse(BaseModel):
     center_lat: float
     center_lng: float
     radius_km: float
+    time_limit_minutes: int = 60
     total_videos: int
     clusters: List[VideoCluster]
     raw_videos: List[VideoResponse]
-
-# --- License Schemas ---
-
-class LicenseCreate(BaseModel):
-    video_id: str
-    buyer_id: str
-
-class LicenseResponse(BaseModel):
-    id: str
-    video_id: str
-    buyer_id: str
-    seller_id: str
-    total_amount: int
-    creator_payout: int
-    platform_fee: int
-    status: str
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
 
 # --- Report Schemas ---
 
@@ -137,7 +192,7 @@ class CommentResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-# --- Profile Summary Schema ---
+# --- Profile Summary Schema (CR-01: License fields removed, Support Account added) ---
 
 class UserProfileSummaryResponse(BaseModel):
     user: UserResponse
@@ -145,10 +200,10 @@ class UserProfileSummaryResponse(BaseModel):
     follower_count: int = 0
     following_count: int = 0
     is_following: bool = False
-    total_license_sales: int = 0
-    total_creator_revenue: int = 0
+    support_account: Optional[SupportAccountResponse] = None
+    total_support_clicks: int = 0
+    ad_creator_pool_revenue: int = 51240
     videos: List[VideoResponse] = []
-    licensed_videos: List[VideoResponse] = []
 
 class FollowToggleResponse(BaseModel):
     target_user_id: str

@@ -1,6 +1,7 @@
 import os
 import math
-from typing import Optional, Dict, Any, List
+import hashlib
+from typing import Optional, Dict, Any, List, Tuple
 import httpx
 from dotenv import load_dotenv
 
@@ -137,5 +138,36 @@ def fuzz_coordinates(lat: float, lon: float, precision_meters: float = 150.0) ->
     fuzzed_lat = round(lat / lat_step) * lat_step
     fuzzed_lon = round(lon / lon_step) * lon_step
     return (round(fuzzed_lat, 5), round(fuzzed_lon, 5))
+
+
+def generate_approximate_coordinates(
+    lat: float,
+    lon: float,
+    video_id: str,
+    min_radius_m: float = 100.0,
+    max_radius_m: float = 200.0,
+) -> Tuple[float, float, int]:
+    """
+    CR-02.C: Generate a deterministic 100~200m generalized/fuzzed public coordinate
+    for a given video_id so that:
+    1) Repeated fetches never move the pin (consistent per video_id).
+    2) Multiple videos from the same spot do not share an identical offset pattern.
+    3) Exact distance is not exposed (returns a standard 150m nominal radius label).
+    """
+    digest = hashlib.sha256(f"nowfield_approx_v1:{video_id}".encode("utf-8")).digest()
+    r_Ratio = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
+    angle_ratio = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
+
+    distance_m = min_radius_m + (max_radius_m - min_radius_m) * r_Ratio
+    theta = 2.0 * math.pi * angle_ratio
+
+    delta_lat = (distance_m * math.cos(theta)) / 111000.0
+    cos_lat = max(0.2, math.cos(math.radians(lat)))
+    delta_lon = (distance_m * math.sin(theta)) / (111000.0 * cos_lat)
+
+    approx_lat = round(lat + delta_lat, 5)
+    approx_lon = round(lon + delta_lon, 5)
+    return approx_lat, approx_lon, 150
+
 
 kakao_service = KakaoLocalService()

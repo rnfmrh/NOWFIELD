@@ -21,7 +21,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
     {'key': 'All', 'label': '전체'},
     {'key': 'Social', 'label': '소셜'},
     {'key': 'Moderation', 'label': '운영·검토'},
-    {'key': 'License', 'label': '라이선스'},
+    {'key': 'Support', 'label': '후원'},
     {'key': 'Earnings', 'label': '수익·정산'},
   ];
 
@@ -31,8 +31,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
         return '소셜';
       case 'Moderation':
         return '운영·검토';
-      case 'License':
-        return '라이선스';
+      case 'Support':
+        return '후원';
       case 'Earnings':
         return '수익·정산';
       default:
@@ -75,8 +75,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
         return Icons.person_add_alt_1_rounded;
       case 'Moderation':
         return Icons.shield_outlined;
-      case 'License':
-        return Icons.monetization_on_outlined;
+      case 'Support':
+        return Icons.volunteer_activism_rounded;
       case 'Earnings':
         return Icons.account_balance_wallet_outlined;
       default:
@@ -90,7 +90,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
         return AppColors.accent;
       case 'Moderation':
         return AppColors.warning;
-      case 'License':
+      case 'Support':
         return AppColors.success;
       case 'Earnings':
         return const Color(0xFFA855F7);
@@ -103,7 +103,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
     final category = alert['category']?.toString() ?? 'Social';
     if (category == 'Moderation') {
       _showModerationAppealSheet(alert);
-    } else if (category == 'License') {
+    } else if (category == 'Support') {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const EarningsScreen(initialTabIndex: 1)),
       );
@@ -401,8 +401,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
                               padding: const EdgeInsets.only(top: 4),
                               child: Text(
                                 isReviewed
-                                    ? '재검토 요청 완료 · ${alert['created_at'] ?? ''}'
-                                    : '${alert['subtitle'] ?? ''} · ${alert['created_at'] ?? ''}',
+                                    ? '재검토 요청 완료 · ${ApiService.formatPublishedDateTime(alert['created_at'])}'
+                                    : '${alert['subtitle'] ?? ''} · ${ApiService.formatPublishedDateTime(alert['created_at'])}',
                                 style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                               ),
                             ),

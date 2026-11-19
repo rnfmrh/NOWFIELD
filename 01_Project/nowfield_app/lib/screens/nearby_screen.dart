@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
@@ -19,16 +20,80 @@ class _NearbyScreenState extends State<NearbyScreen> {
   List<Map<String, dynamic>> _nearbyVideos = [];
   List<Map<String, dynamic>> _kakaoPins = [];
   String _nearbyStateMode = 'normal'; // 'normal', 'empty' (Spec #42), 'denied' (Spec #51.3)
+  Timer? _ttlRefreshTimer;
 
   @override
   void initState() {
     super.initState();
     _fetchVideos();
+    // CR-04: Periodically refresh & prune pins every 30 seconds so pins > 60 minutes old
+    // are automatically removed even while the user keeps NearbyScreen open.
+    _ttlRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) {
+        _pruneExpiredPinsClientSide();
+        _fetchVideos();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ttlRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  /// CR-04: Check if a video is eligible for Nearby map pins:
+  /// status == 'public', location_display_mode != 'hidden', and published_at >= now - TTL minutes
+  bool _isVideoEligibleForNearbyPin(Map<String, dynamic> v) {
+    final status = (v['status'] ?? 'public').toString().toLowerCase();
+    if (status != 'public') return false;
+    final mode = (v['location_display_mode'] ?? 'exact').toString().toLowerCase();
+    if (mode == 'hidden') return false;
+
+    final ttlMinutes = ApiService.nearbyTtlMinutesNotifier.value;
+    final rawPub = (v['published_at'] ?? v['created_at'])?.toString().trim() ?? '';
+    if (rawPub.isNotEmpty && rawPub.contains('T')) {
+      final norm = (rawPub.endsWith('Z') || rawPub.contains('+')) ? rawPub : '${rawPub}Z';
+      final parsed = DateTime.tryParse(norm)?.toUtc();
+      if (parsed != null) {
+        final ageMinutes = DateTime.now().toUtc().difference(parsed).inMinutes;
+        if (ageMinutes > ttlMinutes) return false;
+      }
+    }
+    return true;
+  }
+
+  void _pruneExpiredPinsClientSide() {
+    setState(() {
+      _nearbyVideos = _nearbyVideos.where(_isVideoEligibleForNearbyPin).toList();
+      _kakaoPins = _kakaoPins
+          .map((pin) {
+            final rawVids = (pin['videos'] as List<dynamic>? ?? [])
+                .whereType<Map>()
+                .map((v) => Map<String, dynamic>.from(v))
+                .where(_isVideoEligibleForNearbyPin)
+                .toList();
+            return <String, dynamic>{
+              ...pin,
+              'isStacked': rawVids.length > 1,
+              'videos': rawVids,
+            };
+          })
+          .where((pin) => (pin['videos'] as List).isNotEmpty)
+          .toList();
+    });
   }
 
   Future<void> _fetchVideos() async {
     try {
-      final data = await ApiService.getNearbyData(37.5250, 127.0250);
+      final ttlMinutes = ApiService.nearbyTtlMinutesNotifier.value;
+      // CR-04: Default 1.0km radius & configurable TTL (default 60 minutes = 1.0 hour)
+      final data = await ApiService.getNearbyData(
+        37.5250,
+        127.0250,
+        radiusKm: 1.0,
+        timeLimitHours: ttlMinutes / 60.0,
+      );
       if (mounted) {
         setState(() {
           if (data.containsKey('raw_videos') && data['raw_videos'] is List) {
@@ -36,29 +101,39 @@ class _NearbyScreenState extends State<NearbyScreen> {
             _nearbyVideos = raw
                 .whereType<Map>()
                 .map((v) => Map<String, dynamic>.from(v))
+                .where(_isVideoEligibleForNearbyPin)
                 .toList();
           }
           if (data.containsKey('clusters') && data['clusters'] is List) {
             final clusters = data['clusters'] as List<dynamic>;
-            _kakaoPins = clusters.whereType<Map>().map((c) {
-              final rawClusterVideos = (c['videos'] as List<dynamic>? ?? []);
-              final clusterVideos = rawClusterVideos
-                  .whereType<Map>()
-                  .map((v) => Map<String, dynamic>.from(v))
-                  .toList();
-              final firstTitle = clusterVideos.isNotEmpty
-                  ? (clusterVideos.first['title']?.toString() ?? c['location_name']?.toString() ?? '')
-                  : (c['location_name']?.toString() ?? '');
-              return <String, dynamic>{
-                'id': c['cluster_id']?.toString() ?? '',
-                'title': firstTitle,
-                'location_name': c['location_name']?.toString() ?? '',
-                'lat': (c['latitude'] as num).toDouble(),
-                'lng': (c['longitude'] as num).toDouble(),
-                'isStacked': c['is_stacked'] == true,
-                'videos': clusterVideos,
-              };
-            }).toList();
+            _kakaoPins = clusters
+                .whereType<Map>()
+                .map((c) {
+                  final rawClusterVideos = (c['videos'] as List<dynamic>? ?? []);
+                  final clusterVideos = rawClusterVideos
+                      .whereType<Map>()
+                      .map((v) => Map<String, dynamic>.from(v))
+                      .where(_isVideoEligibleForNearbyPin)
+                      .toList();
+                  final firstTitle = clusterVideos.isNotEmpty
+                      ? (clusterVideos.first['title']?.toString() ?? c['location_name']?.toString() ?? '')
+                      : (c['location_name']?.toString() ?? '');
+                  final firstMode = clusterVideos.isNotEmpty
+                      ? (clusterVideos.first['location_display_mode']?.toString() ?? 'exact')
+                      : 'exact';
+                  return <String, dynamic>{
+                    'id': c['cluster_id']?.toString() ?? '',
+                    'title': firstTitle,
+                    'location_name': c['location_name']?.toString() ?? '',
+                    'locationMode': firstMode,
+                    'lat': (c['latitude'] as num).toDouble(),
+                    'lng': (c['longitude'] as num).toDouble(),
+                    'isStacked': clusterVideos.length > 1,
+                    'videos': clusterVideos,
+                  };
+                })
+                .where((pin) => (pin['videos'] as List).isNotEmpty)
+                .toList();
           }
         });
       }
@@ -112,17 +187,17 @@ class _NearbyScreenState extends State<NearbyScreen> {
               ? _buildLocationDeniedState()
               : Column(
                   children: [
-          // Privacy protection indicator banner
+          // CR-02 & CR-04: Privacy mode & 60-minute TTL indicator banner
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             color: AppColors.card,
             child: Row(
               children: const [
-                Icon(Icons.shield_outlined, size: 16, color: AppColors.accent),
+                Icon(Icons.timer_outlined, size: 16, color: AppColors.accent),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '위치 개인정보 보호를 위해 반경 100m~200m 좌표 퍼징이 적용됩니다.',
+                    '반경 1km · 게시 후 60분 이내 활성 현장 핀만 표시',
                     style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w500),
                   ),
                 ),
@@ -146,6 +221,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                               {
                                 'id': 'cluster_apgu',
                                 'title': '서울 강남구 압구정동',
+                                'locationMode': 'exact',
                                 'lat': 37.5270,
                                 'lng': 127.0284,
                                 'isStacked': true,
@@ -153,6 +229,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                               {
                                 'id': 'single_sinsa',
                                 'title': '서울 강남구 신사동',
+                                'locationMode': 'approximate',
                                 'lat': 37.5205,
                                 'lng': 127.0230,
                                 'isStacked': false,
@@ -160,6 +237,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                               {
                                 'id': 'single_jamwon',
                                 'title': '서울 서초구 잠원동',
+                                'locationMode': 'exact',
                                 'lat': 37.5180,
                                 'lng': 127.0160,
                                 'isStacked': false,
@@ -177,6 +255,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                 .toList()
                             : <Map<String, dynamic>>[];
                         final locationName = matchedPin?['location_name']?.toString() ?? title;
+                        final nowUtc = DateTime.now().toUtc();
 
                         if (isStacked) {
                           final videosToShow = pinVideos.isNotEmpty
@@ -187,7 +266,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                     'title': '압구정 현대백화점 앞 교통 정체',
                                     'uploader_name': '@apgu_now',
                                     'location_name': locationName,
-                                    'time': '3분 전',
+                                    'location_display_mode': 'exact',
+                                    'published_at': nowUtc.subtract(const Duration(minutes: 4)).toIso8601String(),
                                     'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
                                     'thumbnail_url': 'https://picsum.photos/seed/apgu1/600/400',
                                   },
@@ -196,7 +276,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                     'title': '압구정역 3번 출구 퇴근길 버스 정류장 대기줄',
                                     'uploader_name': '@commuter',
                                     'location_name': locationName,
-                                    'time': '15분 전',
+                                    'location_display_mode': 'approximate',
+                                    'published_at': nowUtc.subtract(const Duration(minutes: 15)).toIso8601String(),
                                     'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
                                     'thumbnail_url': 'https://picsum.photos/seed/apgu2/600/400',
                                   },
@@ -205,7 +286,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                     'title': '압구정 로데오 골목 인파 현황',
                                     'uploader_name': '@seoul_walker',
                                     'location_name': locationName,
-                                    'time': '28분 전',
+                                    'location_display_mode': 'exact',
+                                    'published_at': nowUtc.subtract(const Duration(minutes: 28)).toIso8601String(),
                                     'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
                                     'thumbnail_url': 'https://picsum.photos/seed/apgu3/600/400',
                                   },
@@ -221,7 +303,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                       'title': title,
                                       'uploader_name': '@seoul_walker',
                                       'location_name': locationName,
-                                      'time': '1분 전',
+                                      'location_display_mode': 'approximate',
+                                      'published_at': nowUtc.subtract(const Duration(minutes: 5)).toIso8601String(),
                                       'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
                                       'thumbnail_url': 'https://picsum.photos/seed/sinsa1/600/400',
                                     });
@@ -259,7 +342,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                               'title': '신사동 가로수길 카페 앞 실시간',
                               'uploader_name': '@coffee_lover',
                               'location_name': '서울 강남구 신사동',
-                              'time': '1분 전',
+                              'location_display_mode': 'approximate',
+                              'published_at': DateTime.now().toUtc().subtract(const Duration(minutes: 5)).toIso8601String(),
                               'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
                               'thumbnail_url': 'https://picsum.photos/seed/sinsa1/600/400',
                             },
@@ -276,7 +360,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                         {
                           'id': 'v_apgu_1',
                           'title': '압구정 현대백화점 앞 교통 정체',
-                          'time': '3분 전',
+                          'location_display_mode': 'exact',
+                          'published_at': DateTime.now().toUtc().subtract(const Duration(minutes: 4)).toIso8601String(),
                           'uploader_name': '@apgu_now',
                           'location_name': '압구정역 3번 출구 인근',
                           'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
@@ -285,7 +370,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                         {
                           'id': 'v_apgu_2',
                           'title': '압구정 로데오 골목 인파 현황',
-                          'time': '12분 전',
+                          'location_display_mode': 'exact',
+                          'published_at': DateTime.now().toUtc().subtract(const Duration(minutes: 12)).toIso8601String(),
                           'uploader_name': '@seoul_rider',
                           'location_name': '압구정역 3번 출구 인근',
                           'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
@@ -294,7 +380,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                         {
                           'id': 'v_apgu_3',
                           'title': '퇴근길 버스 정류장 대기줄',
-                          'time': '18분 전',
+                          'location_display_mode': 'approximate',
+                          'published_at': DateTime.now().toUtc().subtract(const Duration(minutes: 18)).toIso8601String(),
                           'uploader_name': '@commuter',
                           'location_name': '압구정역 3번 출구 인근',
                           'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
@@ -346,8 +433,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      Text(
-                        '반경 1km',
+                      const Text(
+                        '반경 1km · 60분 TTL',
                         style: TextStyle(color: AppColors.accent, fontSize: 12, fontWeight: FontWeight.w600),
                       ),
                     ],
@@ -368,14 +455,21 @@ class _NearbyScreenState extends State<NearbyScreen> {
                               'title': '주변 실시간 영상 ${index + 1}',
                               'uploader_name': '@field_reporter',
                               'location_name': '서울 강남구 신사동',
-                              'time': '${index + 1}분 전',
+                              'location_display_mode': index.isEven ? 'exact' : 'approximate',
+                              'published_at': DateTime.now()
+                                  .toUtc()
+                                  .subtract(Duration(minutes: (index + 1) * 4))
+                                  .toIso8601String(),
                               'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
                               'thumbnail_url': 'https://picsum.photos/seed/${index + 60}/200/300',
                             };
                       final thumbUrl = ApiService.resolveMediaUrl(
                         (item['thumbnail_url'] ?? item['preview_url']) as String?,
                       );
-                      final timeText = formatVideoTimeAgo(item['created_at'] ?? item['time']);
+                      final timeText = formatVideoTimeAgo(
+                        item['published_at'] ?? item['created_at'] ?? item['time'],
+                        timezone: item['display_timezone']?.toString(),
+                      );
 
                       return GestureDetector(
                         onTap: () => _showSingleVideoModal(context, item),
@@ -495,9 +589,36 @@ class _NearbyScreenState extends State<NearbyScreen> {
     BuildContext context, {
     required Map<String, dynamic> video,
   }) {
+    final mode = (video['location_display_mode'] ?? 'exact').toString().toLowerCase();
+    final isApprox = mode == 'approximate';
     return GestureDetector(
       onTap: () => _showSingleVideoModal(context, video),
-      child: _buildSpeechBubbleWidget(hasPlayIcon: true),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildSpeechBubbleWidget(hasPlayIcon: true, isApproximate: isApprox),
+          const SizedBox(height: 2),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: isApprox ? AppColors.accent : AppColors.warning,
+                width: 0.8,
+              ),
+            ),
+            child: Text(
+              isApprox ? '약 150m' : '정확한 위치',
+              style: TextStyle(
+                color: isApprox ? AppColors.accent : AppColors.warning,
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -507,31 +628,63 @@ class _NearbyScreenState extends State<NearbyScreen> {
     required String locationName,
     required List<Map<String, dynamic>> videos,
   }) {
+    final firstMode = videos.isNotEmpty
+        ? (videos.first['location_display_mode'] ?? 'exact').toString().toLowerCase()
+        : 'exact';
+    final isApprox = firstMode == 'approximate';
     return GestureDetector(
       onTap: () => _showClusterModal(context, locationName, videos),
-      child: Stack(
-        clipBehavior: Clip.none,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Transform.translate(
-            offset: const Offset(10, -10),
-            child: _buildSpeechBubbleWidget(hasPlayIcon: false),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Transform.translate(
+                offset: const Offset(10, -10),
+                child: _buildSpeechBubbleWidget(hasPlayIcon: false, isApproximate: isApprox),
+              ),
+              Transform.translate(
+                offset: const Offset(5, -5),
+                child: _buildSpeechBubbleWidget(hasPlayIcon: false, isApproximate: isApprox),
+              ),
+              _buildSpeechBubbleWidget(hasPlayIcon: true, isApproximate: isApprox),
+            ],
           ),
-          Transform.translate(
-            offset: const Offset(5, -5),
-            child: _buildSpeechBubbleWidget(hasPlayIcon: false),
+          const SizedBox(height: 2),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: isApprox ? AppColors.accent : AppColors.warning,
+                width: 0.8,
+              ),
+            ),
+            child: Text(
+              isApprox ? '약 150m' : '정확한 위치',
+              style: TextStyle(
+                color: isApprox ? AppColors.accent : AppColors.warning,
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
-          _buildSpeechBubbleWidget(hasPlayIcon: true),
         ],
       ),
     );
   }
 
-  Widget _buildSpeechBubbleWidget({required bool hasPlayIcon}) {
+  Widget _buildSpeechBubbleWidget({
+    required bool hasPlayIcon,
+    bool isApproximate = false,
+  }) {
     return CustomPaint(
       size: const Size(44, 38),
       painter: _SpeechBubblePainter(
         fillColor: Colors.white,
-        borderColor: Colors.black,
+        borderColor: isApproximate ? AppColors.accent : Colors.black,
         borderWidth: 2.8,
       ),
       child: SizedBox(
@@ -541,10 +694,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
           padding: const EdgeInsets.only(bottom: 8.0, right: 2.0),
           child: Center(
             child: hasPlayIcon
-                ? const Icon(
-                    Icons.play_arrow_rounded,
+                ? Icon(
+                    isApproximate ? Icons.radar_rounded : Icons.play_arrow_rounded,
                     color: Colors.black,
-                    size: 22,
+                    size: isApproximate ? 18 : 22,
                   )
                 : null,
           ),
@@ -556,8 +709,14 @@ class _NearbyScreenState extends State<NearbyScreen> {
   void _showSingleVideoModal(BuildContext parentContext, Map<String, dynamic> video) {
     final title = video['title']?.toString() ?? '현장 영상';
     final author = (video['uploader_name'] ?? video['author'] ?? '@seoul_walker').toString();
+    final locationMode = (video['location_display_mode'] ?? 'exact').toString();
+    final privacyLabel = video['location_privacy_label']?.toString() ??
+        ApiService.formatLocationPrivacyLabel(locationMode);
     final locationName = video['location_name']?.toString() ?? '';
-    final time = formatVideoTimeAgo(video['created_at'] ?? video['time']);
+    final time = formatVideoTimeAgo(
+      video['published_at'] ?? video['created_at'] ?? video['time'],
+      timezone: video['display_timezone']?.toString(),
+    );
     final thumbUrl = ApiService.resolveMediaUrl(
       (video['thumbnail_url'] ?? video['preview_url']) as String?,
     );
@@ -661,9 +820,11 @@ class _NearbyScreenState extends State<NearbyScreen> {
                       ),
                       Flexible(
                         child: Text(
-                          locationName.isNotEmpty ? ' · $locationName · $time' : ' · $time',
+                          locationName.isNotEmpty
+                              ? ' · $locationName · $time'
+                              : ' · $privacyLabel · $time',
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                          style: const TextStyle(color: AppColors.textMuted, fontSize: 12.5),
                         ),
                       ),
                     ],
@@ -748,7 +909,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                 ),
                 const SizedBox(height: 4),
                 const Text(
-                  '촬영자 사생활 보호 원칙에 따라 약 150m 반경 영상이 1개 핀으로 집약되었습니다.',
+                  '게시 후 60분 이내 활성 현장 핀 · 약 150m 반경 영상이 1개 핀으로 집약되었습니다.',
                   style: TextStyle(color: AppColors.textMuted, fontSize: 11),
                 ),
                 const SizedBox(height: 12),
@@ -758,7 +919,13 @@ class _NearbyScreenState extends State<NearbyScreen> {
                       (v['thumbnail_url'] ?? v['preview_url']) as String?,
                     );
                     final author = (v['uploader_name'] ?? v['author'] ?? '@field_reporter').toString();
-                    final time = formatVideoTimeAgo(v['created_at'] ?? v['time']);
+                    final vMode = (v['location_display_mode'] ?? 'exact').toString();
+                    final vPrivacy = v['location_privacy_label']?.toString() ??
+                        ApiService.formatLocationPrivacyLabel(vMode);
+                    final time = formatVideoTimeAgo(
+                      v['published_at'] ?? v['created_at'] ?? v['time'],
+                      timezone: v['display_timezone']?.toString(),
+                    );
                     return ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
@@ -785,7 +952,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                         style: const TextStyle(color: AppColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
                       ),
                       subtitle: Text(
-                        '$author · $time',
+                        '$author · $vPrivacy · $time',
                         style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                       ),
                       trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.accent),
@@ -805,7 +972,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
     );
   }
 
-  /// Spec #40: Nearby ⚙ Filter & State Settings Sheet
+  /// Spec #40 + CR-04: Nearby ⚙ Filter, Pin TTL & State Settings Sheet
   void _showNearbySettingsSheet(BuildContext parentContext) {
     showModalBottomSheet(
       context: parentContext,
@@ -814,65 +981,111 @@ class _NearbyScreenState extends State<NearbyScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '내 주변 설정 및 화면 상태 확인',
-                  style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final currentTtl = ApiService.nearbyTtlMinutesNotifier.value;
+            final ttlOptions = <Map<String, dynamic>>[
+              {'minutes': 60, 'label': '60분'},
+              {'minutes': 180, 'label': '3시간'},
+              {'minutes': 360, 'label': '6시간'},
+              {'minutes': 1440, 'label': '24시간'},
+            ];
+
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '내 주변 설정 및 화면 상태 확인',
+                      style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '현재 정책: 반경 1km 이내 · 최근 $currentTtl분 이내 게시된 공개 영상 · 정확한 위치/약 100~200m 구분 표시',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      '지도 핀 유지 시간 설정',
+                      style: TextStyle(color: AppColors.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: ttlOptions.map((opt) {
+                        final int mins = opt['minutes'] as int;
+                        final bool selected = currentTtl == mins;
+                        return ChoiceChip(
+                          label: Text(opt['label'] as String),
+                          selected: selected,
+                          selectedColor: AppColors.primary,
+                          backgroundColor: AppColors.background,
+                          labelStyle: TextStyle(
+                            color: selected ? Colors.white : AppColors.textMuted,
+                            fontSize: 12,
+                            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                          ),
+                          onSelected: (_) async {
+                            ApiService.nearbyTtlMinutesNotifier.value = mins;
+                            setSheetState(() {});
+                            await ApiService.updateAdminSettings({'nearby_ttl_minutes': mins});
+                            if (mounted) {
+                              _fetchVideos();
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 12),
+                    const Divider(color: Colors.white12, height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        Icons.map_rounded,
+                        color: _nearbyStateMode == 'normal' ? AppColors.accent : AppColors.textMuted,
+                      ),
+                      title: const Text('실시간 주변 지도 & 피드', style: TextStyle(color: AppColors.textPrimary, fontSize: 14)),
+                      trailing: _nearbyStateMode == 'normal' ? const Icon(Icons.check_circle, color: AppColors.accent) : null,
+                      onTap: () {
+                        setState(() => _nearbyStateMode = 'normal');
+                        Navigator.pop(ctx);
+                      },
+                    ),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        Icons.videocam_off_outlined,
+                        color: _nearbyStateMode == 'empty' ? AppColors.accent : AppColors.textMuted,
+                      ),
+                      title: const Text('내 주변 영상 없음 화면 보기', style: TextStyle(color: AppColors.textPrimary, fontSize: 14)),
+                      trailing: _nearbyStateMode == 'empty' ? const Icon(Icons.check_circle, color: AppColors.accent) : null,
+                      onTap: () {
+                        setState(() => _nearbyStateMode = 'empty');
+                        Navigator.pop(ctx);
+                      },
+                    ),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        Icons.location_disabled_rounded,
+                        color: _nearbyStateMode == 'denied' ? AppColors.warning : AppColors.textMuted,
+                      ),
+                      title: const Text('위치 권한 거부 화면 보기', style: TextStyle(color: AppColors.textPrimary, fontSize: 14)),
+                      trailing: _nearbyStateMode == 'denied' ? const Icon(Icons.check_circle, color: AppColors.warning) : null,
+                      onTap: () {
+                        setState(() => _nearbyStateMode = 'denied');
+                        Navigator.pop(ctx);
+                      },
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 6),
-                const Text(
-                  '기본 정책: 반경 1km 이내 · 최근 1시간 이내 게시된 공개 영상 · 공개 좌표 150m 퍼징',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-                ),
-                const SizedBox(height: 14),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.map_rounded,
-                    color: _nearbyStateMode == 'normal' ? AppColors.accent : AppColors.textMuted,
-                  ),
-                  title: const Text('실시간 주변 지도 & 피드 (기본 모드)', style: TextStyle(color: AppColors.textPrimary, fontSize: 14)),
-                  trailing: _nearbyStateMode == 'normal' ? const Icon(Icons.check_circle, color: AppColors.accent) : null,
-                  onTap: () {
-                    setState(() => _nearbyStateMode = 'normal');
-                    Navigator.pop(ctx);
-                  },
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.videocam_off_outlined,
-                    color: _nearbyStateMode == 'empty' ? AppColors.accent : AppColors.textMuted,
-                  ),
-                  title: const Text('내 주변 영상 없음 화면 보기', style: TextStyle(color: AppColors.textPrimary, fontSize: 14)),
-                  trailing: _nearbyStateMode == 'empty' ? const Icon(Icons.check_circle, color: AppColors.accent) : null,
-                  onTap: () {
-                    setState(() => _nearbyStateMode = 'empty');
-                    Navigator.pop(ctx);
-                  },
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.location_disabled_rounded,
-                    color: _nearbyStateMode == 'denied' ? AppColors.warning : AppColors.textMuted,
-                  ),
-                  title: const Text('위치 권한 거부 화면 보기', style: TextStyle(color: AppColors.textPrimary, fontSize: 14)),
-                  trailing: _nearbyStateMode == 'denied' ? const Icon(Icons.check_circle, color: AppColors.warning) : null,
-                  onTap: () {
-                    setState(() => _nearbyStateMode = 'denied');
-                    Navigator.pop(ctx);
-                  },
-                ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );

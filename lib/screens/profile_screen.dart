@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../constants/app_colors.dart';
 import '../services/api_service.dart';
 import 'earnings_screen.dart';
@@ -23,7 +24,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _profileData;
   List<Map<String, dynamic>> _allUsers = [];
   bool _isFollowing = false;
-  int _followerCount = 128;
+  int _followerCount = 0;
 
   bool get _isViewingOtherUser {
     if (widget.targetUserId == null) return false;
@@ -84,7 +85,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileData = data;
         _allUsers = results[1] as List<Map<String, dynamic>>;
         _isFollowing = data['is_following'] == true;
-        _followerCount = (data['follower_count'] as num?)?.toInt() ?? 64;
+        _followerCount = (data['follower_count'] as num?)?.toInt() ?? 0;
         _isLoading = false;
       });
     }
@@ -193,7 +194,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               indicatorWeight: 2.5,
                               tabs: const [
                                 Tab(text: '영상'),
-                                Tab(text: '라이선스'),
+                                Tab(text: '크리에이터 후원'),
                               ],
                             ),
                           ),
@@ -203,7 +204,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     body: TabBarView(
                       children: [
                         _buildVideoGrid(),
-                        _buildLicensedGrid(),
+                        _buildCreatorSupportTab(),
                       ],
                     ),
                   ),
@@ -306,7 +307,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final locationLabel = _countryToLocationLabel(country);
 
     final videoCount = _profileData?['video_count'] ?? 0;
-    final followingCount = _profileData?['following_count'] ?? 42;
+    final followingCount = _profileData?['following_count'] ?? 0;
     final avatarSeed = username.hashCode.abs() % 30 + 1;
 
     return Column(
@@ -376,26 +377,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         if (_isViewingOtherUser) ...[
           const SizedBox(height: 14),
-          SizedBox(
-            width: 160,
-            height: 36,
-            child: ElevatedButton.icon(
-              onPressed: _handleToggleFollow,
-              icon: Icon(
-                _isFollowing ? Icons.check_rounded : Icons.person_add_alt_1_rounded,
-                size: 16,
-              ),
-              label: Text(
-                _isFollowing ? '팔로잉' : '팔로우',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _isFollowing ? AppColors.card : AppColors.primary,
-                foregroundColor: _isFollowing ? AppColors.accent : Colors.white,
-                side: _isFollowing ? const BorderSide(color: AppColors.accent, width: 1) : null,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-            ),
+          Builder(
+            builder: (context) {
+              final rawSupport = _profileData?['support_account'];
+              final supportMap = rawSupport is Map ? Map<String, dynamic>.from(rawSupport) : null;
+              final hasActiveSupport = supportMap != null &&
+                  supportMap['active'] == true &&
+                  supportMap['ownership_status'] == 'verified' &&
+                  (supportMap['support_url']?.toString().isNotEmpty ?? false);
+
+              return Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  SizedBox(
+                    width: hasActiveSupport ? 136 : 160,
+                    height: 36,
+                    child: ElevatedButton.icon(
+                      onPressed: _handleToggleFollow,
+                      icon: Icon(
+                        _isFollowing ? Icons.check_rounded : Icons.person_add_alt_1_rounded,
+                        size: 16,
+                      ),
+                      label: Text(
+                        _isFollowing ? '팔로잉' : '팔로우',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isFollowing ? AppColors.card : AppColors.primary,
+                        foregroundColor: _isFollowing ? AppColors.accent : Colors.white,
+                        side: _isFollowing ? const BorderSide(color: AppColors.accent, width: 1) : null,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ),
+                  if (hasActiveSupport)
+                    SizedBox(
+                      height: 36,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _showProfileSupportDialog(
+                          context,
+                          username: username,
+                          supportAccount: supportMap,
+                        ),
+                        icon: const Icon(Icons.volunteer_activism_rounded, size: 16, color: Color(0xFFFF6B8B)),
+                        label: const Text(
+                          '후원하기',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFFFF6B8B)),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Color(0xFFFF6B8B), width: 1.1),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ],
         const SizedBox(height: 20),
@@ -413,9 +452,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: [
               _buildStatItem(videoCount.toString(), '영상'),
               Container(width: 1, height: 28, color: Colors.white12),
-              _buildStatItem(_followerCount.toString(), '팔로워'),
+              GestureDetector(
+                onTap: () => _showFollowListSheet(context, '팔로워'),
+                child: _buildStatItem(_followerCount.toString(), '팔로워'),
+              ),
               Container(width: 1, height: 28, color: Colors.white12),
-              _buildStatItem(followingCount.toString(), '팔로잉'),
+              GestureDetector(
+                onTap: () => _showFollowListSheet(context, '팔로잉'),
+                child: _buildStatItem(followingCount.toString(), '팔로잉'),
+              ),
             ],
           ),
         ),
@@ -561,23 +606,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildLicensedGrid() {
-    final rawLicensed = (_profileData?['licensed_videos'] as List<dynamic>?) ?? [];
-    final licensedVideos = rawLicensed
+  /// CR-01: Replaces legacy License tab with Creator Support & Ad Revenue tab
+  Widget _buildCreatorSupportTab() {
+    final rawVideos = (_profileData?['videos'] as List<dynamic>?) ?? [];
+    final allVideos = rawVideos
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
-    final totalSales = _profileData?['total_license_sales'] ?? 0;
-    final totalRevenue = _profileData?['total_creator_revenue'] ?? 0;
+    final supportEnabledVideos = allVideos
+        .where((v) => v['support_enabled'] == true)
+        .toList();
+
+    final rawSupport = _profileData?['support_account'];
+    final supportAccount = rawSupport is Map ? Map<String, dynamic>.from(rawSupport) : null;
+    final hasVerifiedSupport = supportAccount != null &&
+        supportAccount['active'] == true &&
+        supportAccount['ownership_status'] == 'verified' &&
+        (supportAccount['support_url']?.toString().isNotEmpty ?? false);
+    final supportUrl = supportAccount?['support_url']?.toString() ?? '';
+    final provider = supportAccount?['provider']?.toString().toUpperCase() ?? 'KO-FI';
+    final totalSupportClicks = _profileData?['total_support_clicks'] ??
+        supportEnabledVideos.fold<int>(
+          0,
+          (sum, v) => sum + ((v['support_click_count'] as num?)?.toInt() ?? 0),
+        );
+    final username = ((_profileData?['user'] as Map?)?['username']?.toString()) ??
+        widget.targetUsername ??
+        ApiService.currentUsername;
 
     return Column(
       children: [
-        // Spec #48 & #49: License & Earnings Dashboard banner (clickable -> EarningsScreen)
+        // CR-01: Creator Support & Ad Pool Banner
         GestureDetector(
           onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const EarningsScreen(initialTabIndex: 0)),
-            );
+            if (_isViewingOtherUser) {
+              if (hasVerifiedSupport) {
+                _showProfileSupportDialog(
+                  context,
+                  username: username,
+                  supportAccount: supportAccount,
+                );
+              }
+            } else {
+              Navigator.of(context)
+                  .push(
+                    MaterialPageRoute(builder: (_) => const EarningsScreen(initialTabIndex: 1)),
+                  )
+                  .then((_) => _loadProfileData());
+            }
           },
           child: Container(
             margin: const EdgeInsets.fromLTRB(12, 12, 12, 8),
@@ -585,7 +661,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             decoration: BoxDecoration(
               color: AppColors.card,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.cardBorder.withOpacity(0.45)),
+              border: Border.all(
+                color: hasVerifiedSupport
+                    ? const Color(0xFFFF6B8B).withOpacity(0.55)
+                    : AppColors.cardBorder.withOpacity(0.45),
+              ),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -594,18 +674,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        '라이선스 수익 현황 (탭하여 상세 보기)',
+                      Row(
+                        children: [
+                          const Icon(Icons.volunteer_activism_rounded, color: Color(0xFFFF6B8B), size: 15),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              _isViewingOtherUser
+                                  ? '외부 크리에이터 후원'
+                                  : '크리에이터 후원 연결 · 광고 수익 정산 관리',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        hasVerifiedSupport
+                            ? '$provider 연결됨 · $supportUrl'
+                            : (_isViewingOtherUser ? '연결된 외부 후원 페이지 없음' : '외부 후원 URL 미연결'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: AppColors.textMuted, fontSize: 11),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '₩$totalRevenue',
-                        style: const TextStyle(
-                          color: AppColors.accent,
-                          fontSize: 18,
+                        style: TextStyle(
+                          color: hasVerifiedSupport ? AppColors.accent : AppColors.textPrimary,
+                          fontSize: 13.5,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -623,8 +717,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '판매 $totalSales건 · 보유 ${licensedVideos.length}건',
-                        style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
+                        '후원 활성 ${supportEnabledVideos.length}건 · 클릭 $totalSupportClicks회',
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       const SizedBox(width: 4),
                       const Icon(Icons.chevron_right_rounded, color: AppColors.accent, size: 16),
@@ -636,12 +734,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         Expanded(
-          child: licensedVideos.isEmpty
-              ? const Center(
-                  child: Text(
-                    '구매하거나 판매된 라이선스 영상 내역이 없습니다.\n영상 더보기(⋯) 메뉴에서 라이선스를 구매하면 여기에 표시됩니다.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.5),
+          child: supportEnabledVideos.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Text(
+                      _isViewingOtherUser
+                          ? '이 크리에이터가 후원 버튼을 활성화한 영상이 없습니다.'
+                          : '후원 버튼이 활성화된 영상이 없습니다.\n촬영 시 또는 [수익 및 후원 관리]에서 외부 후원 계정을 연결하고 영상별 후원 버튼을 켤 수 있습니다.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.5),
+                    ),
                   ),
                 )
               : GridView.builder(
@@ -653,13 +756,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     mainAxisSpacing: 2,
                     childAspectRatio: 9 / 16,
                   ),
-                  itemCount: licensedVideos.length,
+                  itemCount: supportEnabledVideos.length,
                   itemBuilder: (context, index) {
-                    final v = licensedVideos[index];
+                    final v = supportEnabledVideos[index];
                     final thumbUrl = ApiService.resolveMediaUrl(
                       (v['thumbnail_url'] ?? v['preview_url']) as String?,
                     );
-                    final price = v['license_price'] ?? 10000;
+                    final clickCount = (v['support_click_count'] as num?)?.toInt() ?? 0;
 
                     return GestureDetector(
                       onTap: () {
@@ -667,7 +770,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           MaterialPageRoute(
                             builder: (_) => VideoDetailScreen(
                               videoData: v,
-                              videoList: licensedVideos,
+                              videoList: supportEnabledVideos,
                               initialIndex: index,
                             ),
                           ),
@@ -690,23 +793,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             top: 6,
                             right: 6,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: AppColors.accent,
+                                color: const Color(0xFFFF6B8B),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: const Text(
-                                '라이선스',
-                                style: TextStyle(color: AppColors.background, fontSize: 9, fontWeight: FontWeight.bold),
+                                '후원 ON',
+                                style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
                               ),
                             ),
                           ),
                           Positioned(
                             bottom: 8,
                             left: 6,
-                            child: Text(
-                              '₩$price',
-                              style: const TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.bold),
+                            right: 6,
+                            child: Row(
+                              children: [
+                                const Icon(Icons.volunteer_activism, color: Color(0xFFFF6B8B), size: 12),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    '클릭 $clickCount회',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
@@ -716,6 +834,95 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
         ),
       ],
+    );
+  }
+
+  void _showProfileSupportDialog(
+    BuildContext parentContext, {
+    required String username,
+    required Map<String, dynamic> supportAccount,
+  }) {
+    final supportUrl = supportAccount['support_url']?.toString() ?? '';
+    final provider = supportAccount['provider']?.toString().toUpperCase() ?? 'KO-FI';
+
+    showDialog(
+      context: parentContext,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.card,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.volunteer_activism_rounded, color: Color(0xFFFF6B8B), size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '$username 크리에이터 후원하기',
+                style: const TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFF6B8B).withOpacity(0.45)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '외부 후원 서비스 · $provider',
+                    style: const TextStyle(color: AppColors.accent, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  SelectableText(
+                    supportUrl,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '• NOWFIELD 플랫폼 수수료 0%: 후원금은 외부 결제 페이지를 통해 크리에이터에게 직접 전달됩니다.\n'
+              '• 자발적 후원 안내: 후원 여부에 따라 앱 내 디지털 기능, 배지, 독점 콘텐츠 잠금해제 또는 노출 우대 혜택이 제공되지 않습니다.',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('닫기', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: const Text('외부 후원 페이지 열기', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: supportUrl));
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (parentContext.mounted) {
+                ScaffoldMessenger.of(parentContext).showSnackBar(
+                  SnackBar(
+                    content: Text('외부 후원 링크로 이동합니다: $supportUrl'),
+                    backgroundColor: AppColors.primary,
+                  ),
+                );
+              }
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -796,7 +1003,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       subtitle: Text(
                         currentUser != null
                             ? '현재 로그인 계정: ${currentUser['username']}'
-                            : '로그아웃 상태 (탭하여 로그인)',
+                            : '로그아웃 상태',
                         style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                       ),
                       trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
@@ -832,41 +1039,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     const Divider(color: Colors.white12),
 
-                    // 2. Earnings & Licenses
+                    // 2. Earnings & Creator Support (CR-01)
                     ListTile(
                       leading: const Icon(Icons.account_balance_wallet_outlined, color: AppColors.success),
                       title: const Text(
-                        '수익 정산 관리',
+                        '광고 수익 정산 관리',
                         style: TextStyle(color: AppColors.textPrimary, fontSize: 14.5, fontWeight: FontWeight.w600),
                       ),
                       subtitle: const Text(
-                        '크리에이터 풀 광고 수익(30%) 및 라이선스(80%) 지급 내역',
+                        '크리에이터 풀 광고 수익 자동 정산 내역',
                         style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                       ),
                       trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
                       onTap: () {
                         Navigator.pop(ctx);
-                        Navigator.of(parentContext).push(
-                          MaterialPageRoute(builder: (_) => const EarningsScreen(initialTabIndex: 0)),
-                        );
+                        Navigator.of(parentContext)
+                            .push(
+                              MaterialPageRoute(builder: (_) => const EarningsScreen(initialTabIndex: 0)),
+                            )
+                            .then((_) => _loadProfileData());
                       },
                     ),
                     ListTile(
-                      leading: const Icon(Icons.workspace_premium_outlined, color: AppColors.accent),
+                      leading: const Icon(Icons.volunteer_activism_outlined, color: Color(0xFFFF6B8B)),
                       title: const Text(
-                        '라이선스 관리',
+                        '크리에이터 후원 계정 연결',
                         style: TextStyle(color: AppColors.textPrimary, fontSize: 14.5, fontWeight: FontWeight.w600),
                       ),
                       subtitle: const Text(
-                        '내 영상 라이선스 판매 가격 설정 및 거래 내역',
+                        'Ko-fi · Buy Me a Coffee · PayPal.Me 연결 및 영상별 후원 버튼 설정',
                         style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                       ),
                       trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
                       onTap: () {
                         Navigator.pop(ctx);
-                        Navigator.of(parentContext).push(
-                          MaterialPageRoute(builder: (_) => const EarningsScreen(initialTabIndex: 1)),
-                        );
+                        Navigator.of(parentContext)
+                            .push(
+                              MaterialPageRoute(builder: (_) => const EarningsScreen(initialTabIndex: 1)),
+                            )
+                            .then((_) => _loadProfileData());
                       },
                     ),
                     const Divider(color: Colors.white12),
@@ -874,9 +1085,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     // 3. Privacy, Blocked Users, Notifications, Language, Captions, Location
                     ListTile(
                       leading: const Icon(Icons.block_flipped, color: AppColors.warning),
-                      title: Text(
-                        '차단한 사용자 관리 ($blockedCount명)',
-                        style: const TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
+                      title: const Text(
+                        '차단한 사용자 관리',
+                        style: TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
                       ),
                       subtitle: const Text(
                         '차단한 사용자의 영상/댓글 노출 제한 및 차단 해제',
@@ -896,12 +1107,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         style: TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
                       ),
                       subtitle: const Text(
-                        '소셜, 운영·검토, 라이선스 판매, 월별 정산 알림 수신',
+                        '소셜, 운영·검토, 크리에이터 후원 연결, 월별 광고 정산 알림 수신',
                         style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                       ),
                       value: notifOn,
                       onChanged: (val) {
                         ApiService.notificationsEnabledNotifier.value = val;
+                        setSheetState(() {});
+                      },
+                    ),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.gps_fixed_rounded, color: AppColors.accent),
+                      activeColor: AppColors.accent,
+                      title: const Text(
+                        '정확한 위치 공개 사전 동의',
+                        style: TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
+                      ),
+                      subtitle: const Text(
+                        '영상 업로드 시 정확한 위치 기본 선택을 위한 명시적 사전 동의',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      ),
+                      value: ApiService.exactLocationConsentNotifier.value,
+                      onChanged: (val) async {
+                        await ApiService.recordExactLocationConsent(val);
+                        setSheetState(() {});
+                      },
+                    ),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.location_searching_rounded, color: AppColors.textPrimary),
+                      activeColor: AppColors.accent,
+                      title: const Text(
+                        'OS 정밀 위치 권한 상태',
+                        style: TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
+                      ),
+                      subtitle: const Text(
+                        '비활성화 시 정확한 위치 선택이 제한되며 대략적 위치로 대체됩니다',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      ),
+                      value: ApiService.preciseLocationPermissionNotifier.value,
+                      onChanged: (val) {
+                        ApiService.preciseLocationPermissionNotifier.value = val;
                         setSheetState(() {});
                       },
                     ),
@@ -939,14 +1184,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         setSheetState(() {});
                       },
                     ),
+                    ListTile(
+                      leading: const Icon(Icons.radar_rounded, color: AppColors.textPrimary),
+                      title: const Text(
+                        '다른 시선 반경 설정',
+                        style: TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
+                      ),
+                      subtitle: const Text(
+                        '영상 주변의 "다른 시선" 검색 반경',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      ),
+                      trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _showAnglesRadiusDialog(parentContext);
+                      },
+                    ),
                     const ListTile(
                       leading: Icon(Icons.my_location_rounded, color: AppColors.textPrimary),
                       title: Text(
-                        '위치 권한 및 개인정보 보호 정책',
+                        '위치 공개 정밀도 및 지도 핀 정책',
                         style: TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
                       ),
                       subtitle: Text(
-                        '내 주변 탭 이용 시에만 사용 · 공개 좌표 150m 격자 퍼징 자동 적용',
+                        '영상별 정확한 위치 / 대략적 위치 / 위치 미표시 선택 가능 · 내 주변 지도 핀은 게시 후 60분간만 노출',
                         style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                       ),
                     ),
@@ -1034,9 +1295,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _showApiUrlDialog(BuildContext parentContext) {
     final controller = TextEditingController(text: ApiService.baseUrl);
     final presets = [
-      ApiService.defaultBaseUrl,
       'http://127.0.0.1:8000',
       'http://10.0.2.2:8000',
+      'https://nothing-cash-spoke-burns.trycloudflare.com',
     ];
 
     showDialog(
@@ -1134,6 +1395,167 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  void _showFollowListSheet(BuildContext parentContext, String type) {
+    final userId = (_profileData?['user'] as Map?)?['id']?.toString() ?? ApiService.currentUserId;
+
+    showModalBottomSheet(
+      context: parentContext,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) {
+        return FutureBuilder<List<Map<String, dynamic>>>(
+          future: type == '팔로워'
+              ? ApiService.getFollowers(userId)
+              : ApiService.getFollowing(userId),
+          builder: (context, snapshot) {
+            final list = snapshot.data ?? [];
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40, height: 4,
+                        decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      '$type ${list.length}명',
+                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 17, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 12),
+                    if (snapshot.connectionState == ConnectionState.waiting)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(child: CircularProgressIndicator(color: AppColors.accent)),
+                      )
+                    else if (list.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: Text(
+                            '$type이 없습니다',
+                            style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+                          ),
+                        ),
+                      )
+                    else
+                      ...list.map((user) => ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: AppColors.background,
+                          backgroundImage: user['profile_image'] != null
+                              ? NetworkImage(ApiService.resolveMediaUrl(user['profile_image']))
+                              : null,
+                          child: user['profile_image'] == null
+                              ? const Icon(Icons.person, color: AppColors.textMuted, size: 20)
+                              : null,
+                        ),
+                        title: Text(
+                          user['username'] ?? '@unknown',
+                          style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
+                        ),
+                        trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 18),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.of(parentContext).push(
+                            MaterialPageRoute(
+                              builder: (_) => ProfileScreen(
+                                targetUserId: user['user_id'],
+                                targetUsername: user['username'],
+                              ),
+                            ),
+                          );
+                        },
+                      )),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showAnglesRadiusDialog(BuildContext parentContext) {
+    final controller = TextEditingController();
+    bool loading = true;
+
+    showDialog(
+      context: parentContext,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            if (loading) {
+              ApiService.getAdminSettings().then((settings) {
+                final current = settings['angles_radius_km'] ?? 1.0;
+                controller.text = current.toString();
+                setDialogState(() => loading = false);
+              });
+            }
+            return AlertDialog(
+              backgroundColor: AppColors.card,
+              title: const Text('다른 시선 반경 설정', style: TextStyle(color: AppColors.textPrimary, fontSize: 16)),
+              content: loading
+                  ? const SizedBox(height: 48, child: Center(child: CircularProgressIndicator(color: AppColors.accent)))
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          '영상 위치 기준으로 주변 영상을 검색할 반경을 설정합니다.',
+                          style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: controller,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          style: const TextStyle(color: AppColors.textPrimary),
+                          decoration: InputDecoration(
+                            labelText: '반경 (km)',
+                            labelStyle: const TextStyle(color: AppColors.textMuted),
+                            suffixText: 'km',
+                            suffixStyle: const TextStyle(color: AppColors.accent),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: AppColors.cardBorder),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: const BorderSide(color: AppColors.accent),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('취소', style: TextStyle(color: AppColors.textMuted)),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    final val = double.tryParse(controller.text);
+                    if (val != null && val > 0) {
+                      await ApiService.updateAdminSettings({'angles_radius_km': val});
+                      if (context.mounted) Navigator.pop(ctx);
+                    }
+                  },
+                  child: const Text('저장', style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _showBlockedUsersDialog(BuildContext parentContext) {
     showDialog(
       context: parentContext,
@@ -1196,10 +1618,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         content: const SingleChildScrollView(
           child: Text(
-            '• 원테이크·최대 60초: NOWFIELD 카메라로 직접 촬영한 최대 60초 영상만 게시합니다.\n'
-            '• 안전 및 제재 정책: 명백한 음란물 및 불법 촬영물은 즉시 삭제되며 계정이 영구 이용정지됩니다.\n'
-            '• 개인정보 및 위치 보호: 공개 지도는 촬영자 보호를 위해 150m 퍼징 좌표를 사용합니다.\n'
-            '• 수익 배분: 광고 순수익 30%는 크리에이터 풀(유효 조회 품질 지수 기준)로, 라이선스 순액은 크리에이터 80% / 플랫폼 20%로 배분됩니다.',
+            '• 원테이크·최대 60초: NOWFIELD 카메라로 직접 촬영한 최대 60초 현장 영상만 게시합니다.\n'
+            '• 크리에이터 후원: 영상 라이선스 마켓은 운영하지 않으며, Ko-fi·Buy Me a Coffee·PayPal.Me 등 외부 후원 링크를 통해 플랫폼 수수료 0%로 크리에이터에게 직접 후원할 수 있습니다.\n'
+            '• 위치 공개 정밀도 선택: 영상별로 정확한 위치, 약 100~200m 범위, 위치 미표시 중 선택할 수 있으며 원본 촬영 좌표는 외부 API에 노출되지 않습니다.\n'
+            '• 업로드 일시 표기: 상대 시간 대신 실제 서버 게시 시각 기준 절대 날짜·시간을 표시합니다.\n'
+            '• 내 주변 지도 핀 60분 자동 만료: 반경 1km 이내, 게시 후 60분 이내의 공개 영상만 내 주변 지도에 핀으로 표시되며 60분 경과 시 지도 핀에서만 자동 제외됩니다.\n'
+            '• 광고 수익 배분: 광고 순수익의 크리에이터 풀은 월별 자동 정산되며 외부 후원금과 별도로 집계됩니다.',
             style: TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.55),
           ),
         ),

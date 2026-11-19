@@ -350,8 +350,17 @@ class _SearchScreenState extends State<SearchScreen> {
     final title = video['title']?.toString() ?? '현장 영상';
     final subtitle = video['subtitle']?.toString() ?? '';
     final uploaderName = video['uploader_name']?.toString() ?? '@seoul_walker';
-    final locationName = video['location_name']?.toString() ?? 'Seoul';
-    final timeStr = formatVideoTimeAgo(video['created_at']);
+    final locationMode = (video['location_display_mode'] ?? 'exact').toString().toLowerCase();
+    final isHiddenLocation = locationMode == 'hidden';
+    final locationNameRaw = video['location_name']?.toString() ?? 'Seoul';
+    final locationName = isHiddenLocation ? '위치 미표시' : locationNameRaw;
+    final locationDisplayStr = isHiddenLocation
+        ? '위치 미표시'
+        : locationName;
+    final timeStr = formatVideoTimeAgo(
+      video['published_at'] ?? video['created_at'],
+      timezone: video['display_timezone']?.toString(),
+    );
     final likeCount = video['like_count']?.toString() ?? '0';
     final commentCount = video['comment_count']?.toString() ?? '0';
     final thumbUrl = ApiService.resolveMediaUrl(
@@ -438,11 +447,15 @@ class _SearchScreenState extends State<SearchScreen> {
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      const Icon(Icons.location_on, size: 12, color: AppColors.accent),
+                      Icon(
+                        isHiddenLocation ? Icons.location_off_outlined : Icons.location_on,
+                        size: 12,
+                        color: isHiddenLocation ? AppColors.textMuted : AppColors.accent,
+                      ),
                       const SizedBox(width: 3),
                       Expanded(
                         child: Text(
-                          '$locationName · $uploaderName · $timeStr',
+                          '$locationDisplayStr · $uploaderName · $timeStr',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w500),

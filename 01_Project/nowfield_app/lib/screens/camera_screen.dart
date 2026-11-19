@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import '../constants/app_colors.dart';
 import '../services/api_service.dart';
+import 'earnings_screen.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -32,6 +33,7 @@ class _CameraScreenState extends State<CameraScreen> {
   // Spec #4 Metadata: Capture Session ID & Start/End timestamps
   String _captureSessionId = '';
   DateTime? _captureStartTime;
+  // ignore: unused_field
   DateTime? _captureEndTime;
 
   @override
@@ -201,12 +203,25 @@ class _CameraScreenState extends State<CameraScreen> {
     });
   }
 
-  /// Spec #35 & #36: Publish UI with 100-char title limit, License On/Off & Price, Step-by-step progress, and Retry
+  /// v1.1 CR-01, CR-02, CR-03 Publish UI:
+  /// - CR-02: Location precision selector (`exact` default, `approximate`, `hidden`), pre-publish map pin preview,
+  ///          warning ("⚠️ 이 위치가 모든 시청자에게 공개됩니다"), explicit first-time consent, OS precise permission & sensitive place guard.
+  /// - CR-01: License sales removed; replaced with per-video `후원 버튼 표시` (`support_enabled`) toggle (default OFF, requires verified support URL).
+  /// - CR-03: Passes separate `captured_at` & `display_timezone`.
   void _showPublishBottomSheet(XFile? file, int durationSec) {
     final titleController = TextEditingController(text: '서울 강남구 신사동 가로수길 실시간 인파 현황');
-    bool licenseEnabled = true; // Spec #35: License this video (Off / On)
-    int licensePrice = 10000;   // Spec #35: License Price ₩10,000
-    final customPriceController = TextEditingController(text: '10000');
+
+    // CR-02: Default selection is 'exact' (Exact Location), subject to explicit consent & OS precise permission
+    String locationDisplayMode = 'exact'; // 'exact', 'approximate', 'hidden'
+    bool exactLocationConsented = ApiService.exactLocationConsentNotifier.value;
+    bool precisePermissionGranted = ApiService.preciseLocationPermissionNotifier.value;
+    bool isSensitivePlace = false;
+
+    // CR-01: Per-video creator support button toggle (Default OFF; requires verified CreatorSupportAccount)
+    bool supportEnabled = false;
+    Map<String, dynamic>? linkedSupportAccount =
+        ApiService.supportAccountsCacheNotifier.value[ApiService.currentUserId];
+    bool hascheckedSupportAccount = false;
 
     double lat = 37.5204;
     double lng = 127.0229;
@@ -220,7 +235,7 @@ class _CameraScreenState extends State<CameraScreen> {
       '영상 업로드 중...',
       '자막 자동 생성 중...',
       '안전성 및 정책 검사 중...',
-      '현장 위치 데이터 검증 중...',
+      '현장 위치 프라이버시 및 타임스탬프 검증 중...',
     ];
 
     showModalBottomSheet(
@@ -233,10 +248,81 @@ class _CameraScreenState extends State<CameraScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setModalState) {
+            if (!hascheckedSupportAccount) {
+              hascheckedSupportAccount = true;
+              ApiService.getSupportAccount(ApiService.currentUserId).then((acc) {
+                if (ctx.mounted) {
+                  setModalState(() {
+                    linkedSupportAccount = acc;
+                    if (acc == null || acc['active'] != true || acc['ownership_status'] != 'verified') {
+                      supportEnabled = false;
+                    }
+                  });
+                }
+              });
+            }
+
+            final bool canEnableSupport = linkedSupportAccount != null &&
+                linkedSupportAccount!['active'] == true &&
+                linkedSupportAccount!['ownership_status'] == 'verified' &&
+                (linkedSupportAccount!['support_url']?.toString().trim().isNotEmpty == true);
+
+            Future<bool> promptExactLocationConsentDialog() async {
+              final result = await showDialog<bool>(
+                context: ctx,
+                barrierDismissible: false,
+                builder: (dCtx) => AlertDialog(
+                  backgroundColor: AppColors.card,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  title: const Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 22),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '정확한 위치 공개 사전 동의',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  content: const Text(
+                    '⚠️ 이 위치가 모든 시청자에게 공개됩니다.\n\n'
+                    '• 정확한 위치로 게시하면 촬영 지점의 정밀 지도 핀이 시청자에게 표시됩니다.\n'
+                    '• 집·거주지·학교·병원 등 민감 장소에서 촬영한 경우 약 100~200m 범위 또는 위치 미표시를 권장합니다.\n'
+                    '• 동의하지 않더라도 약 100~200m 범위 또는 위치 미표시로 안전하게 게시할 수 있습니다.',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.5),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dCtx, false),
+                      child: const Text(
+                        '약 100~200m 범위로 전환',
+                        style: TextStyle(color: AppColors.textMuted),
+                      ),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () => Navigator.pop(dCtx, true),
+                      child: const Text('동의하고 정확한 위치 공개'),
+                    ),
+                  ],
+                ),
+              );
+              return result == true;
+            }
+
             Future<void> executePublish() async {
               final title = titleController.text.trim();
               if (title.isEmpty) {
-                setModalState(() => uploadError = '영상 제목을 입력해주세요. (최대 100자)');
+                setModalState(() => uploadError = '영상 제목을 입력해주세요.');
                 return;
               }
               if (title.length > 100) {
@@ -244,10 +330,24 @@ class _CameraScreenState extends State<CameraScreen> {
                 return;
               }
 
-              final parsedPrice = int.tryParse(customPriceController.text.replaceAll(',', '').trim()) ?? 10000;
-              if (licenseEnabled && parsedPrice < 1000) {
-                setModalState(() => uploadError = '라이선스 가격은 최소 ₩1,000 이상이어야 합니다.');
-                return;
+              // CR-02.B: Enforce consent, OS precise permission & sensitive place policy before publishing Exact Location
+              String effectiveMode = locationDisplayMode;
+              if (effectiveMode == 'exact') {
+                if (!precisePermissionGranted || isSensitivePlace) {
+                  effectiveMode = 'approximate';
+                  setModalState(() => locationDisplayMode = 'approximate');
+                } else if (!exactLocationConsented) {
+                  final agreed = await promptExactLocationConsentDialog();
+                  if (!ctx.mounted) return;
+                  if (agreed) {
+                    exactLocationConsented = true;
+                    await ApiService.recordExactLocationConsent(true);
+                    setModalState(() {});
+                  } else {
+                    effectiveMode = 'approximate';
+                    setModalState(() => locationDisplayMode = 'approximate');
+                  }
+                }
               }
 
               setModalState(() {
@@ -302,6 +402,8 @@ class _CameraScreenState extends State<CameraScreen> {
                   videoBytes = _generateDummyMp4Bytes();
                 }
 
+                final capturedIso = (_captureStartTime ?? DateTime.now()).toUtc().toIso8601String();
+
                 final res = await ApiService.uploadVideo(
                   videoBytes: videoBytes,
                   filename: 'capture_${DateTime.now().millisecondsSinceEpoch}.mp4',
@@ -310,8 +412,13 @@ class _CameraScreenState extends State<CameraScreen> {
                   latitude: lat,
                   longitude: lng,
                   uploaderId: ApiService.currentUserId,
-                  licenseEnabled: licenseEnabled,
-                  licensePrice: licenseEnabled ? parsedPrice : 0,
+                  locationDisplayMode: effectiveMode,
+                  exactLocationConsented: exactLocationConsented,
+                  precisePermissionGranted: precisePermissionGranted,
+                  isSensitivePlace: isSensitivePlace,
+                  supportEnabled: canEnableSupport && supportEnabled,
+                  capturedAt: capturedIso,
+                  displayTimezone: 'Asia/Seoul',
                   recordedDuration: durationSec,
                   captureSessionId: _captureSessionId,
                 );
@@ -332,12 +439,15 @@ class _CameraScreenState extends State<CameraScreen> {
                   if (ctx.mounted) {
                     setModalState(() => uploadProgress = 1.0);
                   }
+                  final finalMode = res['location_display_mode']?.toString() ?? effectiveMode;
+                  final finalPrivacyLabel = ApiService.formatLocationPrivacyLabel(finalMode);
+                  final finalSupport = res['support_enabled'] == true;
                   nav.pop();
                   _handleRetake(); // Reset camera back to ready state after publish
                   messenger.showSnackBar(
-                    SnackBar(
+                    const SnackBar(
                       content: Text(
-                        '현장 영상이 게시되었습니다! (${res['location_name'] ?? '서울 강남구 신사동'} · ${licenseEnabled ? '라이선스 ₩$parsedPrice' : '라이선스 비활성'})',
+                        '현장 영상이 게시되었습니다!',
                       ),
                       backgroundColor: AppColors.primary,
                     ),
@@ -521,7 +631,7 @@ class _CameraScreenState extends State<CameraScreen> {
                               ),
                               SizedBox(height: 2),
                               Text(
-                                '지금 목격하고 있는 현장 상황을 적어주세요 (최대 100자)',
+                                '지금 목격하고 있는 현장 상황을 적어주세요',
                                 style: TextStyle(color: AppColors.textMuted, fontSize: 11),
                               ),
                             ],
@@ -600,7 +710,252 @@ class _CameraScreenState extends State<CameraScreen> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Spec #35: License this video
+                      // CR-02: Location Precision & Default Value (Exact default, Approximate 100~200m, Hidden)
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppColors.background,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: locationDisplayMode == 'exact'
+                                ? AppColors.warning.withOpacity(0.55)
+                                : AppColors.cardBorder,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: const [
+                                    Icon(Icons.my_location_rounded, color: AppColors.accent, size: 18),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      '위치 공개 정밀도 설정',
+                                      style: TextStyle(
+                                        color: AppColors.textPrimary,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withOpacity(0.22),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    ApiService.formatLocationPrivacyLabel(locationDisplayMode),
+                                    style: const TextStyle(
+                                      color: AppColors.accent,
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _buildRadioOption(
+                                    label: '정확한 위치',
+                                    selected: locationDisplayMode == 'exact',
+                                    onTap: () {
+                                      if (!precisePermissionGranted) {
+                                        setModalState(() {
+                                          locationDisplayMode = 'approximate';
+                                        });
+                                        ScaffoldMessenger.of(this.context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('OS 정밀 위치 권한이 꺼져 있어 약 100~200m 범위로 설정됩니다.'),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      if (isSensitivePlace) {
+                                        setModalState(() {
+                                          locationDisplayMode = 'approximate';
+                                        });
+                                        ScaffoldMessenger.of(this.context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('민감 장소 보호를 위해 약 100~200m 범위 또는 위치 미표시만 허용됩니다.'),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      setModalState(() => locationDisplayMode = 'exact');
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: _buildRadioOption(
+                                    label: '약 100~200m',
+                                    selected: locationDisplayMode == 'approximate',
+                                    onTap: () => setModalState(() => locationDisplayMode = 'approximate'),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: _buildRadioOption(
+                                    label: '위치 미표시',
+                                    selected: locationDisplayMode == 'hidden',
+                                    onTap: () => setModalState(() => locationDisplayMode = 'hidden'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+
+                            // Pre-publish Map Pin Preview Card (CR-02.A & CR-02.B)
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: AppColors.card,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: AppColors.cardBorder),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.background,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: locationDisplayMode == 'hidden'
+                                            ? Colors.white24
+                                            : (locationDisplayMode == 'exact'
+                                                ? AppColors.warning
+                                                : AppColors.accent),
+                                      ),
+                                    ),
+                                    child: Center(
+                                      child: Icon(
+                                        locationDisplayMode == 'hidden'
+                                            ? Icons.location_off_outlined
+                                            : (locationDisplayMode == 'exact'
+                                                ? Icons.place_rounded
+                                                : Icons.radar_rounded),
+                                        color: locationDisplayMode == 'hidden'
+                                            ? AppColors.textMuted
+                                            : (locationDisplayMode == 'exact'
+                                                ? AppColors.warning
+                                                : AppColors.accent),
+                                        size: 24,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          locationDisplayMode == 'exact'
+                                              ? '지도 핀 미리보기: 서울 강남구 신사동'
+                                              : (locationDisplayMode == 'approximate'
+                                                  ? '지도 핀 미리보기: 서울 강남구 신사동 · 약 100~200m 일반화 핀'
+                                                  : '지도 핀 미생성 · 피드 및 프로필에 위치 미표시'),
+                                          style: const TextStyle(
+                                            color: AppColors.textPrimary,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          locationDisplayMode == 'exact'
+                                              ? '⚠️ 이 위치가 모든 시청자에게 공개됩니다'
+                                              : (locationDisplayMode == 'approximate'
+                                                  ? '촬영 지점에서 100~200m 범위의 고정 일반화 좌표만 공개되며 원본 좌표는 비공개 보관됩니다.'
+                                                  : '공개 API 응답에서 위치 좌표가 제외되며 Nearby 지도 핀에 나타나지 않습니다.'),
+                                          style: TextStyle(
+                                            color: locationDisplayMode == 'exact'
+                                                ? AppColors.warning
+                                                : AppColors.textMuted,
+                                            fontSize: 11,
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            // CR-02.B: Explicit Consent Checkbox & Sensitive Place Guard
+                            if (locationDisplayMode == 'exact') ...[
+                              const SizedBox(height: 8),
+                              GestureDetector(
+                                onTap: () async {
+                                  final nextVal = !exactLocationConsented;
+                                  setModalState(() => exactLocationConsented = nextVal);
+                                  await ApiService.recordExactLocationConsent(nextVal);
+                                },
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      exactLocationConsented
+                                          ? Icons.check_box_rounded
+                                          : Icons.check_box_outline_blank_rounded,
+                                      color: exactLocationConsented ? AppColors.accent : AppColors.warning,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    const Expanded(
+                                      child: Text(
+                                        '[필수 사전 동의] 정확한 촬영 위치가 모든 시청자에게 공개됨을 확인하고 동의합니다.',
+                                        style: TextStyle(color: AppColors.textPrimary, fontSize: 11.5),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 6),
+                            GestureDetector(
+                              onTap: () {
+                                setModalState(() {
+                                  isSensitivePlace = !isSensitivePlace;
+                                  if (isSensitivePlace && locationDisplayMode == 'exact') {
+                                    locationDisplayMode = 'approximate';
+                                  }
+                                });
+                              },
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    isSensitivePlace
+                                        ? Icons.check_box_rounded
+                                        : Icons.check_box_outline_blank_rounded,
+                                    color: isSensitivePlace ? AppColors.warning : AppColors.textMuted,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  const Expanded(
+                                    child: Text(
+                                      '집·거주지·학교·병원 등 민감 장소에서 촬영됨',
+                                      style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // CR-01: Per-video Creator Support Toggle (Replaces License Sales)
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
@@ -616,10 +971,10 @@ class _CameraScreenState extends State<CameraScreen> {
                               children: [
                                 Row(
                                   children: const [
-                                    Icon(Icons.workspace_premium_rounded, color: AppColors.accent, size: 18),
+                                    Icon(Icons.volunteer_activism_rounded, color: AppColors.accent, size: 18),
                                     SizedBox(width: 6),
                                     Text(
-                                      '라이선스 판매 설정',
+                                      '후원 버튼 표시',
                                       style: TextStyle(
                                         color: AppColors.textPrimary,
                                         fontSize: 13,
@@ -632,86 +987,77 @@ class _CameraScreenState extends State<CameraScreen> {
                                   children: [
                                     _buildRadioOption(
                                       label: '꺼짐',
-                                      selected: !licenseEnabled,
-                                      onTap: () => setModalState(() => licenseEnabled = false),
+                                      selected: !supportEnabled,
+                                      onTap: () => setModalState(() => supportEnabled = false),
                                     ),
-                                    const SizedBox(width: 10),
+                                    const SizedBox(width: 8),
                                     _buildRadioOption(
                                       label: '켜짐',
-                                      selected: licenseEnabled,
-                                      onTap: () => setModalState(() => licenseEnabled = true),
+                                      selected: canEnableSupport && supportEnabled,
+                                      onTap: () {
+                                        if (!canEnableSupport) {
+                                          ScaffoldMessenger.of(this.context).showSnackBar(
+                                            const SnackBar(
+                                              content: Text('유효한 외부 후원 URL이 연결 및 검증된 경우에만 켤 수 있습니다.'),
+                                            ),
+                                          );
+                                          return;
+                                        }
+                                        setModalState(() => supportEnabled = true);
+                                      },
                                     ),
                                   ],
                                 ),
                               ],
                             ),
-                            if (licenseEnabled) ...[
-                              const Divider(color: AppColors.cardBorder, height: 20),
+                            const SizedBox(height: 8),
+                            if (canEnableSupport) ...[
+                              Text(
+                                supportEnabled
+                                    ? '시청자에게 [후원하기] 버튼이 노출되며 탭 시 ${linkedSupportAccount!['support_url']} 로 연결됩니다.'
+                                    : '연결된 후원 페이지가 있습니다. 이 영상에서 후원 버튼을 노출하려면 [켜짐]을 선택하세요.',
+                                style: TextStyle(
+                                  color: supportEnabled ? AppColors.accent : AppColors.textMuted,
+                                  fontSize: 11.5,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ] else ...[
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text(
-                                    '표준 라이선스 판매 가격',
-                                    style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-                                  ),
-                                  Text(
-                                    '크리에이터 80% 정산 (₩${((int.tryParse(customPriceController.text) ?? licensePrice) * 0.8).toInt()})',
-                                    style: const TextStyle(
-                                      color: AppColors.success,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
+                                  const Expanded(
+                                    child: Text(
+                                      '연결된 외부 후원 계정이 없습니다.',
+                                      style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
                                     ),
                                   ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  for (final preset in [5000, 10000, 20000, 50000]) ...[
-                                    Expanded(
-                                      child: GestureDetector(
-                                        onTap: () {
-                                          setModalState(() {
-                                            licensePrice = preset;
-                                            customPriceController.text = preset.toString();
-                                          });
-                                        },
-                                        child: Container(
-                                          margin: const EdgeInsets.only(right: 6),
-                                          padding: const EdgeInsets.symmetric(vertical: 8),
-                                          decoration: BoxDecoration(
-                                            color: licensePrice == preset
-                                                ? AppColors.primary.withOpacity(0.25)
-                                                : AppColors.card,
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(
-                                              color: licensePrice == preset
-                                                  ? AppColors.primary
-                                                  : AppColors.cardBorder,
-                                            ),
-                                          ),
-                                          alignment: Alignment.center,
-                                          child: Text(
-                                            '₩${preset ~/ 1000},000',
-                                            style: TextStyle(
-                                              color: licensePrice == preset
-                                                  ? AppColors.accent
-                                                  : AppColors.textMuted,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
+                                  TextButton.icon(
+                                    onPressed: () async {
+                                      await Navigator.of(this.context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => const EarningsScreen(initialTabIndex: 1),
                                         ),
+                                      );
+                                      final updatedAcc =
+                                          await ApiService.getSupportAccount(ApiService.currentUserId);
+                                      if (ctx.mounted) {
+                                        setModalState(() {
+                                          linkedSupportAccount = updatedAcc;
+                                        });
+                                      }
+                                    },
+                                    icon: const Icon(Icons.link_rounded, color: AppColors.accent, size: 15),
+                                    label: const Text(
+                                      '후원 페이지 연결',
+                                      style: TextStyle(
+                                        color: AppColors.accent,
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                                  ],
+                                  ),
                                 ],
-                              ),
-                            ] else ...[
-                              const SizedBox(height: 6),
-                              const Text(
-                                '라이선스 판매를 끄면 다른 사용자가 이 영상을 구매/다운로드할 수 없습니다.',
-                                style: TextStyle(color: AppColors.textMuted, fontSize: 11),
                               ),
                             ],
                           ],
@@ -719,7 +1065,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       ),
                       const SizedBox(height: 12),
 
-                      // Location & Metadata Auto-Detection Info (Spec #4, #12, #59)
+                      // CR-03 Metadata Auto-Detection Info (captured_at vs published_at, session)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
@@ -731,11 +1077,11 @@ class _CameraScreenState extends State<CameraScreen> {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.location_on, color: AppColors.accent, size: 15),
+                                const Icon(Icons.schedule_rounded, color: AppColors.accent, size: 15),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
-                                    '위치: 서울 강남구 신사동 (프라이버시 보호 150m 퍼징 적용 · ${ApiService.currentUsername})',
+                                    '촬영 시각: ${ApiService.formatPublishedDateTime((_captureStartTime ?? DateTime.now()).toUtc().toIso8601String())} · 게시 시각 별도 기록',
                                     style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                                   ),
                                 ),
@@ -869,7 +1215,7 @@ class _CameraScreenState extends State<CameraScreen> {
               Navigator.of(ctx).pop();
               _handleRetake();
             },
-            child: const Text('확인 (영상 삭제됨)'),
+            child: const Text('확인'),
           ),
         ],
       ),
@@ -1124,8 +1470,8 @@ class _CameraScreenState extends State<CameraScreen> {
                   const SizedBox(height: 8),
                   Text(
                     _isRecording
-                        ? '탭하여 촬영 종료 (최대 60초 자동 종료)'
-                        : '탭하여 현장 촬영 시작 (사진첩 업로드·편집 불가)',
+                        ? '탭하여 촬영 종료'
+                        : '탭하여 현장 촬영 시작',
                     style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                 ],

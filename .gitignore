@@ -48,9 +48,11 @@ Thumbs.db
 
 # Uploads
 01_Project/nowfield_backend/uploads/
+backend/uploads/
 
 # Admin settings (local config)
 01_Project/nowfield_backend/admin_settings.json
+backend/admin_settings.json
 
 # OMC
 .omc/

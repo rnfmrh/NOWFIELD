@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String defaultBaseUrl = 'https://nothing-cash-spoke-burns.trycloudflare.com';
+  static const String defaultBaseUrl = 'http://127.0.0.1:8000';
 
   static final ValueNotifier<String> baseUrlNotifier =
       ValueNotifier<String>(defaultBaseUrl);
@@ -23,14 +23,45 @@ class ApiService {
     'id': 'u_seoul_walker',
     'username': '@seoul_walker',
     'country': 'KR',
+    'exact_location_consent': false,
   });
 
   static Map<String, dynamic>? get currentUser => currentUserNotifier.value;
   static String get currentUserId => currentUser?['id']?.toString() ?? 'u_seoul_walker';
   static String get currentUsername => currentUser?['username']?.toString() ?? '@seoul_walker';
 
+  /// CR-02.B: Explicit user consent for Exact Location disclosure & OS precise location permission
+  static final ValueNotifier<bool> exactLocationConsentNotifier = ValueNotifier<bool>(false);
+  static final ValueNotifier<bool> preciseLocationPermissionNotifier = ValueNotifier<bool>(true);
+
+  /// CR-01: Local reactive cache of CreatorSupportAccount per userId
+  static final ValueNotifier<Map<String, Map<String, dynamic>>> supportAccountsCacheNotifier =
+      ValueNotifier<Map<String, Map<String, dynamic>>>({
+    'u_seoul_walker': {
+      'id': 'sup_u_seoul_walker',
+      'user_id': 'u_seoul_walker',
+      'provider': 'kofi',
+      'support_url': 'https://ko-fi.com/seoul_walker',
+      'ownership_status': 'verified',
+      'verified_at': '2026-11-09T09:00:00Z',
+      'active': true,
+    },
+    'u_apgu_now': {
+      'id': 'sup_u_apgu_now',
+      'user_id': 'u_apgu_now',
+      'provider': 'buymeacoffee',
+      'support_url': 'https://buymeacoffee.com/apgu_now',
+      'ownership_status': 'verified',
+      'verified_at': '2026-11-09T09:00:00Z',
+      'active': true,
+    },
+  });
+
   static void loginAs(Map<String, dynamic> user) {
     currentUserNotifier.value = Map<String, dynamic>.from(user);
+    if (user['exact_location_consent'] is bool) {
+      exactLocationConsentNotifier.value = user['exact_location_consent'] as bool;
+    }
   }
 
   static void logout() {
@@ -46,6 +77,7 @@ class ApiService {
   static final ValueNotifier<String> defaultCaptionLangNotifier = ValueNotifier<String>('원문');
   static final ValueNotifier<String> appLanguageNotifier = ValueNotifier<String>('한국어');
   static final ValueNotifier<bool> notificationsEnabledNotifier = ValueNotifier<bool>(true);
+  static final ValueNotifier<int> nearbyTtlMinutesNotifier = ValueNotifier<int>(60);
 
   static void blockUser(String usernameOrId) {
     final normalized = usernameOrId.trim();
@@ -75,6 +107,283 @@ class ApiService {
     feedFilterVersionNotifier.value++;
   }
 
+  /// CR-03: Format published_at / captured_at as absolute localized date & time with timezone.
+  /// Primary display NEVER uses relative strings like "2시간 전" or "방금 전".
+  /// Korean: 2026.11.12. 오후 7:30 (KST)
+  /// English: Nov 12, 2026, 7:30 PM (KST)
+  static String formatPublishedDateTime(
+    dynamic rawTimestamp, {
+    String? timezone,
+    bool forceEnglish = false,
+  }) {
+    DateTime utcTime;
+    final rawStr = rawTimestamp?.toString().trim() ?? '';
+
+    if (rawStr.isEmpty) {
+      utcTime = DateTime.now().toUtc();
+    } else {
+      final normalized = (rawStr.endsWith('Z') || rawStr.contains('+'))
+          ? rawStr
+          : (rawStr.contains('T') ? '${rawStr}Z' : rawStr);
+      final parsed = DateTime.tryParse(normalized);
+      if (parsed != null) {
+        utcTime = parsed.toUtc();
+      } else {
+        // Convert any legacy relative fallback string into a concrete absolute timestamp
+        final nowUtc = DateTime.now().toUtc();
+        final minMatch = RegExp(r'(\d+)\s*분').firstMatch(rawStr);
+        final hourMatch = RegExp(r'(\d+)\s*시간').firstMatch(rawStr);
+        final dayMatch = RegExp(r'(\d+)\s*일').firstMatch(rawStr);
+        if (minMatch != null) {
+          utcTime = nowUtc.subtract(Duration(minutes: int.parse(minMatch.group(1)!)));
+        } else if (hourMatch != null) {
+          utcTime = nowUtc.subtract(Duration(hours: int.parse(hourMatch.group(1)!)));
+        } else if (dayMatch != null) {
+          utcTime = nowUtc.subtract(Duration(days: int.parse(dayMatch.group(1)!)));
+        } else {
+          utcTime = nowUtc;
+        }
+      }
+    }
+
+    final tz = (timezone == null || timezone.trim().isEmpty) ? 'Asia/Seoul' : timezone.trim();
+    // Apply KST (+09:00) when Asia/Seoul or KST, otherwise local offset
+    final bool isKst = tz == 'Asia/Seoul' || tz.toUpperCase() == 'KST';
+    final DateTime displayTime = isKst ? utcTime.add(const Duration(hours: 9)) : utcTime.toLocal();
+    final String tzAbbr = isKst ? 'KST' : 'UTC';
+
+    final int year = displayTime.year;
+    final int month = displayTime.month;
+    final int day = displayTime.day;
+    final int hour24 = displayTime.hour;
+    final int minute = displayTime.minute;
+    final String minutePadded = minute.toString().padLeft(2, '0');
+    final bool isPm = hour24 >= 12;
+    final int hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+
+    final bool useEnglish = forceEnglish ||
+        appLanguageNotifier.value == 'English' ||
+        appLanguageNotifier.value == '영어';
+    if (useEnglish) {
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      ];
+      final mName = months[(month - 1).clamp(0, 11)];
+      final amPm = isPm ? 'PM' : 'AM';
+      return '$hour12:$minutePadded $amPm · $mName $day, $year';
+    }
+
+    final String amPmKo = isPm ? '오후' : '오전';
+    final String monthPadded = month.toString().padLeft(2, '0');
+    final String dayPadded = day.toString().padLeft(2, '0');
+    return '$year.$monthPadded.$dayPadded. $amPmKo $hour12:$minutePadded';
+  }
+
+  /// CR-02: Human-readable location privacy label
+  static String formatLocationPrivacyLabel(String? mode, {int? approxRadiusM}) {
+    final m = (mode ?? 'exact').toLowerCase();
+    if (m == 'hidden') return '위치 미표시';
+    if (m == 'approximate') return '약 100~200m 범위';
+    return '정확한 위치';
+  }
+
+  /// CR-01: Client-side validation for allowed external support domains
+  /// Allowed: ko-fi.com, buymeacoffee.com, paypal.me (https only, no internal payment params)
+  static String? validateSupportUrl(String provider, String rawUrl) {
+    final trimmed = rawUrl.trim();
+    if (trimmed.isEmpty) {
+      return '외부 후원 페이지 URL을 입력해주세요.';
+    }
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || uri.scheme.toLowerCase() != 'https' || uri.host.isEmpty) {
+      return '보안을 위해 https:// 로 시작하는 유효한 URL만 등록할 수 있습니다.';
+    }
+    final host = uri.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    const allowedDomains = <String, List<String>>{
+      'kofi': ['ko-fi.com'],
+      'buymeacoffee': ['buymeacoffee.com'],
+      'paypal': ['paypal.me', 'paypal.com'],
+    };
+    final p = provider.toLowerCase();
+    final allowedForProvider = allowedDomains[p] ??
+        ['ko-fi.com', 'buymeacoffee.com', 'paypal.me', 'paypal.com'];
+    if (!allowedForProvider.contains(host)) {
+      return '허용된 외부 후원 도메인(${allowedForProvider.join(', ')})만 연결할 수 있습니다.';
+    }
+    final pathSegments = uri.pathSegments.where((s) => s.trim().isNotEmpty).toList();
+    if (pathSegments.isEmpty) {
+      return '크리에이터 고유 프로필 경로가 포함된 URL을 입력해주세요 (예: https://ko-fi.com/creator).';
+    }
+    if (uri.query.isNotEmpty || uri.fragment.isNotEmpty) {
+      return '보안을 위해 쿼리 파라미터(?...)가 없는 순수 프로필 URL만 허용됩니다.';
+    }
+    return null;
+  }
+
+  /// CR-01: Fetch creator's linked external support account
+  static Future<Map<String, dynamic>?> getSupportAccount([String? userId]) async {
+    final targetId = userId ?? currentUserId;
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/users/${Uri.encodeComponent(targetId)}/support-account'),
+      );
+      if (response.statusCode == 200) {
+        final body = utf8.decode(response.bodyBytes).trim();
+        if (body.isNotEmpty && body != 'null') {
+          final decoded = json.decode(body);
+          if (decoded is Map<String, dynamic>) {
+            final next = Map<String, Map<String, dynamic>>.from(supportAccountsCacheNotifier.value);
+            next[targetId] = decoded;
+            supportAccountsCacheNotifier.value = next;
+            return decoded;
+          }
+        } else {
+          final next = Map<String, Map<String, dynamic>>.from(supportAccountsCacheNotifier.value);
+          next.remove(targetId);
+          supportAccountsCacheNotifier.value = next;
+          return null;
+        }
+      }
+    } catch (_) {}
+    return supportAccountsCacheNotifier.value[targetId];
+  }
+
+  /// CR-01: Connect & verify creator external support account (0% platform fee)
+  static Future<Map<String, dynamic>> saveSupportAccount({
+    required String provider,
+    required String supportUrl,
+    String? userId,
+  }) async {
+    final targetId = userId ?? currentUserId;
+    final validationError = validateSupportUrl(provider, supportUrl);
+    if (validationError != null) {
+      return {'error': validationError};
+    }
+
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/users/${Uri.encodeComponent(targetId)}/support-account'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'provider': provider.toLowerCase(),
+          'support_url': supportUrl.trim(),
+          'verify_ownership': true,
+        }),
+      );
+      if (response.statusCode == 200) {
+        final decoded = json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+        final next = Map<String, Map<String, dynamic>>.from(supportAccountsCacheNotifier.value);
+        next[targetId] = decoded;
+        supportAccountsCacheNotifier.value = next;
+        return decoded;
+      } else {
+        final err = json.decode(utf8.decode(response.bodyBytes));
+        return {'error': err['detail']?.toString() ?? '후원 계정 연결에 실패했습니다.'};
+      }
+    } catch (_) {
+      final fallbackAcc = <String, dynamic>{
+        'id': 'sup_$targetId',
+        'user_id': targetId,
+        'provider': provider.toLowerCase(),
+        'support_url': supportUrl.trim(),
+        'ownership_status': 'verified',
+        'verified_at': DateTime.now().toUtc().toIso8601String(),
+        'active': true,
+      };
+      final next = Map<String, Map<String, dynamic>>.from(supportAccountsCacheNotifier.value);
+      next[targetId] = fallbackAcc;
+      supportAccountsCacheNotifier.value = next;
+      return fallbackAcc;
+    }
+  }
+
+  /// CR-01: Disconnect external support account
+  static Future<bool> disconnectSupportAccount([String? userId]) async {
+    final targetId = userId ?? currentUserId;
+    final next = Map<String, Map<String, dynamic>>.from(supportAccountsCacheNotifier.value);
+    next.remove(targetId);
+    supportAccountsCacheNotifier.value = next;
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/users/${Uri.encodeComponent(targetId)}/support-account'),
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// CR-01: Track click on external support button (statistical reference only, NOT revenue)
+  static Future<Map<String, dynamic>> recordSupportClick(String videoId) async {
+    try {
+      final viewerParam = Uri.encodeComponent(currentUserId);
+      final response = await http.post(
+        Uri.parse('$baseUrl/videos/${Uri.encodeComponent(videoId)}/support-click?viewer_id=$viewerParam'),
+      );
+      if (response.statusCode == 200) {
+        return json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {'video_id': videoId, 'recorded': true};
+  }
+
+  /// Spec v1.1 Principle 8 (Privacy by Choice) & CR-01/CR-02:
+  /// Update an existing video's support_enabled and/or location_display_mode
+  static Future<Map<String, dynamic>> updateVideoSettings({
+    required String videoId,
+    bool? supportEnabled,
+    String? locationDisplayMode,
+    bool? exactLocationConsented,
+  }) async {
+    final payload = <String, dynamic>{
+      'requester_id': currentUserId,
+      'precise_permission_granted': preciseLocationPermissionNotifier.value,
+      if (supportEnabled != null) 'support_enabled': supportEnabled,
+      if (locationDisplayMode != null) 'location_display_mode': locationDisplayMode,
+      if (exactLocationConsented != null) 'exact_location_consented': exactLocationConsented,
+    };
+    try {
+      final response = await http.patch(
+        Uri.parse('$baseUrl/videos/${Uri.encodeComponent(videoId)}/settings'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(payload),
+      );
+      if (response.statusCode == 200) {
+        final decoded = json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+        feedFilterVersionNotifier.value++;
+        return decoded;
+      }
+    } catch (_) {}
+    feedFilterVersionNotifier.value++;
+    return {
+      'id': videoId,
+      if (supportEnabled != null) 'support_enabled': supportEnabled,
+      if (locationDisplayMode != null) ...{
+        'location_display_mode': locationDisplayMode,
+        'location_privacy_label': formatLocationPrivacyLabel(locationDisplayMode),
+      },
+    };
+  }
+
+  /// CR-02.B: Record user's explicit consent for Exact Location disclosure
+  static Future<void> recordExactLocationConsent(bool consented) async {
+    exactLocationConsentNotifier.value = consented;
+    final cur = currentUserNotifier.value;
+    if (cur != null) {
+      final updated = Map<String, dynamic>.from(cur);
+      updated['exact_location_consent'] = consented;
+      currentUserNotifier.value = updated;
+    }
+    try {
+      await http.post(
+        Uri.parse(
+          '$baseUrl/users/${Uri.encodeComponent(currentUserId)}/location-consent?consented=$consented',
+        ),
+      );
+    } catch (_) {}
+  }
+
   /// Spec #1 & #50: Delete Account
   static Future<bool> deleteCurrentAccount() async {
     final uid = currentUserId;
@@ -90,7 +399,7 @@ class ApiService {
     }
   }
 
-  /// Spec #16 & #46: Fetch dynamic Alerts
+  /// Spec #16 & #46 + CR-01: Fetch dynamic Alerts (License category replaced with Support)
   static Future<List<Map<String, dynamic>>> getAlerts() async {
     try {
       final uid = Uri.encodeComponent(currentUserId);
@@ -105,6 +414,7 @@ class ApiService {
         }
       }
     } catch (_) {}
+    final nowIso = DateTime.now().toUtc().toIso8601String();
     return [
       {
         'id': 'alt_spec_social',
@@ -113,7 +423,7 @@ class ApiService {
         'subtitle': '압구정·신사 지역 현장 크리에이터',
         'target_user_id': 'u_apgu_now',
         'target_username': '@apgujeong_now',
-        'created_at': '2분 전',
+        'created_at': nowIso,
       },
       {
         'id': 'alt_spec_mod_review',
@@ -123,27 +433,26 @@ class ApiService {
         'video_id': 'v_sinsa_1',
         'video_title': '신사동 가로수길 카페 앞 실시간',
         'reason': '해당 영상에 대해 다수의 신고가 접수되어 확인 중입니다.',
-        'created_at': '18분 전',
+        'created_at': nowIso,
       },
       {
-        'id': 'alt_spec_license',
-        'category': 'License',
-        'title': '내 영상 라이선스가 판매되었습니다 · 판매가 ₩10,000',
-        'subtitle': '표준 상업 라이선스 · 크리에이터 80% 정산 (₩6,800 ~ ₩8,000)',
-        'video_id': 'v_sinsa_1',
-        'created_at': '1시간 전',
+        'id': 'alt_spec_support',
+        'category': 'Support',
+        'title': '외부 크리에이터 후원 페이지 연결이 활성화되었습니다',
+        'subtitle': 'https://ko-fi.com/seoul_walker · NOWFIELD 플랫폼 수수료 0%',
+        'created_at': nowIso,
       },
       {
         'id': 'alt_spec_earnings',
         'category': 'Earnings',
-        'title': '이번 달 크리에이터 수익 정산이 확정되었습니다',
-        'subtitle': '크리에이터 풀 (광고 순수익 30%) 및 라이선스 정산 내역을 확인하세요.',
-        'created_at': '1일 전',
+        'title': '이번 달 크리에이터 풀 정산 내역 안내',
+        'subtitle': '유효 조회 품질 지수 기준 광고 수익 배분 내역을 확인하세요.',
+        'created_at': nowIso,
       },
     ];
   }
 
-  /// Fetch full user profile summary (uploaded videos, licensed videos, stats)
+  /// Fetch full user profile summary (CR-01: uploaded videos, support account, stats; no licenses)
   static Future<Map<String, dynamic>> getUserProfile([String? userId]) async {
     final targetId = Uri.encodeComponent(userId ?? currentUserId);
     final viewerId = Uri.encodeComponent(currentUserId);
@@ -154,10 +463,18 @@ class ApiService {
       if (response.statusCode == 200) {
         final decoded = json.decode(utf8.decode(response.bodyBytes));
         if (decoded is Map<String, dynamic>) {
+          if (decoded['support_account'] is Map<String, dynamic>) {
+            final next = Map<String, Map<String, dynamic>>.from(supportAccountsCacheNotifier.value);
+            next[userId ?? currentUserId] =
+                Map<String, dynamic>.from(decoded['support_account'] as Map);
+            supportAccountsCacheNotifier.value = next;
+          }
           return decoded;
         }
       }
     } catch (_) {}
+    final nowUtc = DateTime.now().toUtc();
+    final cachedSupport = supportAccountsCacheNotifier.value[userId ?? currentUserId];
     final fallbackVideos = [
       {
         'id': 'v_sinsa_1',
@@ -166,12 +483,21 @@ class ApiService {
         'uploader_id': 'u_seoul_walker',
         'uploader_name': '@seoul_walker',
         'location_name': '서울 강남구 신사동',
+        'location_display_mode': 'approximate',
+        'location_privacy_label': '약 100~200m 범위',
+        'display_lat': 37.5212,
+        'display_lng': 127.0238,
         'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
         'thumbnail_url': 'https://picsum.photos/seed/sinsa1/600/900',
         'like_count': 24,
         'comment_count': 5,
-        'license_price': 10000,
-        'created_at': '5분 전',
+        'support_enabled': true,
+        'creator_support_url': cachedSupport?['support_url'] ?? 'https://ko-fi.com/seoul_walker',
+        'creator_support_provider': cachedSupport?['provider'] ?? 'kofi',
+        'captured_at': nowUtc.subtract(const Duration(minutes: 6)).toIso8601String(),
+        'published_at': nowUtc.subtract(const Duration(minutes: 5)).toIso8601String(),
+        'display_timezone': 'Asia/Seoul',
+        'created_at': nowUtc.subtract(const Duration(minutes: 5)).toIso8601String(),
       },
       {
         'id': 'v_apgu_1',
@@ -180,12 +506,21 @@ class ApiService {
         'uploader_id': 'u_apgu_now',
         'uploader_name': '@apgu_now',
         'location_name': '서울 강남구 압구정동',
+        'location_display_mode': 'exact',
+        'location_privacy_label': '정확한 위치',
+        'display_lat': 37.5273,
+        'display_lng': 127.0285,
         'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
         'thumbnail_url': 'https://picsum.photos/seed/apgu1/600/900',
         'like_count': 18,
         'comment_count': 3,
-        'license_price': 10000,
-        'created_at': '12분 전',
+        'support_enabled': true,
+        'creator_support_url': 'https://buymeacoffee.com/apgu_now',
+        'creator_support_provider': 'buymeacoffee',
+        'captured_at': nowUtc.subtract(const Duration(minutes: 13)).toIso8601String(),
+        'published_at': nowUtc.subtract(const Duration(minutes: 12)).toIso8601String(),
+        'display_timezone': 'Asia/Seoul',
+        'created_at': nowUtc.subtract(const Duration(minutes: 12)).toIso8601String(),
       },
     ];
     return {
@@ -193,15 +528,15 @@ class ApiService {
         'id': userId ?? currentUserId,
         'username': (userId != null && userId.startsWith('@')) ? userId : currentUsername,
         'country': 'KR',
+        'exact_location_consent': exactLocationConsentNotifier.value,
       },
       'video_count': fallbackVideos.length,
       'follower_count': 128,
       'following_count': 42,
       'is_following': false,
-      'total_license_sales': 3,
-      'total_creator_revenue': 22000,
+      'support_account': cachedSupport,
+      'total_support_clicks': 14,
       'videos': fallbackVideos,
-      'licensed_videos': [fallbackVideos.first],
     };
   }
 
@@ -218,6 +553,32 @@ class ApiService {
       }
     } catch (_) {}
     return {};
+  }
+
+  static Future<List<Map<String, dynamic>>> getFollowers(String userId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/users/${Uri.encodeComponent(userId)}/followers'),
+      );
+      if (response.statusCode == 200) {
+        final decoded = json.decode(utf8.decode(response.bodyBytes)) as List<dynamic>;
+        return decoded.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<List<Map<String, dynamic>>> getFollowing(String userId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/users/${Uri.encodeComponent(userId)}/following'),
+      );
+      if (response.statusCode == 200) {
+        final decoded = json.decode(utf8.decode(response.bodyBytes)) as List<dynamic>;
+        return decoded.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      }
+    } catch (_) {}
+    return [];
   }
 
   /// Fetch all registered users for account switching
@@ -260,15 +621,18 @@ class ApiService {
     return {};
   }
 
-  /// Get nearby videos along with clustered pins (Spec Rule #8 & #9)
+  /// CR-04: Get nearby videos along with clustered pins within 1km & 60-minute TTL
   static Future<Map<String, dynamic>> getNearbyData(
     double lat,
     double lng, {
-    double radiusKm = 3.0,
+    double radiusKm = 1.0,
+    double timeLimitHours = 1.0,
   }) async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/videos/nearby?lat=$lat&lng=$lng&radius_km=$radiusKm'),
+        Uri.parse(
+          '$baseUrl/videos/nearby?lat=$lat&lng=$lng&radius_km=$radiusKm&time_limit_hours=$timeLimitHours',
+        ),
       );
       if (response.statusCode == 200) {
         final decoded = json.decode(utf8.decode(response.bodyBytes));
@@ -336,6 +700,7 @@ class ApiService {
       }
     } catch (_) {}
     final qLower = query.trim().toLowerCase();
+    final nowUtc = DateTime.now().toUtc();
     final sampleVideos = [
       {
         'id': 'v_sinsa_1',
@@ -344,11 +709,19 @@ class ApiService {
         'uploader_id': 'u_seoul_walker',
         'uploader_name': '@seoul_walker',
         'location_name': '서울 강남구 신사동',
+        'location_display_mode': 'approximate',
+        'location_privacy_label': '약 100~200m 범위',
         'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
         'thumbnail_url': 'https://picsum.photos/seed/sinsa1/600/900',
         'like_count': 24,
         'comment_count': 5,
-        'created_at': '5분 전',
+        'support_enabled': true,
+        'creator_support_url': 'https://ko-fi.com/seoul_walker',
+        'creator_support_provider': 'kofi',
+        'captured_at': nowUtc.subtract(const Duration(minutes: 6)).toIso8601String(),
+        'published_at': nowUtc.subtract(const Duration(minutes: 5)).toIso8601String(),
+        'display_timezone': 'Asia/Seoul',
+        'created_at': nowUtc.subtract(const Duration(minutes: 5)).toIso8601String(),
       },
       {
         'id': 'v_apgu_1',
@@ -357,11 +730,19 @@ class ApiService {
         'uploader_id': 'u_apgu_now',
         'uploader_name': '@apgu_now',
         'location_name': '서울 강남구 압구정동',
+        'location_display_mode': 'exact',
+        'location_privacy_label': '정확한 위치',
         'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
         'thumbnail_url': 'https://picsum.photos/seed/apgu1/600/900',
         'like_count': 18,
         'comment_count': 3,
-        'created_at': '12분 전',
+        'support_enabled': true,
+        'creator_support_url': 'https://buymeacoffee.com/apgu_now',
+        'creator_support_provider': 'buymeacoffee',
+        'captured_at': nowUtc.subtract(const Duration(minutes: 13)).toIso8601String(),
+        'published_at': nowUtc.subtract(const Duration(minutes: 12)).toIso8601String(),
+        'display_timezone': 'Asia/Seoul',
+        'created_at': nowUtc.subtract(const Duration(minutes: 12)).toIso8601String(),
       },
     ].where((v) {
       if (qLower.isEmpty) return true;
@@ -393,20 +774,6 @@ class ApiService {
               }
             ],
     };
-  }
-
-  /// Purchase video license (80:20 split)
-  static Future<Map<String, dynamic>> purchaseLicense(String videoId) async {
-    try {
-      final buyerId = currentUserId;
-      final response = await http.post(
-        Uri.parse('$baseUrl/videos/$videoId/license?buyer_id=$buyerId'),
-      );
-      if (response.statusCode == 200) {
-        return json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      }
-    } catch (_) {}
-    return {};
   }
 
   /// Toggle video like (Spec #15 & #27: Like / Cancel Like)
@@ -492,7 +859,7 @@ class ApiService {
     return {};
   }
 
-  /// Upload recorded video file with metadata (One Take & One Minute pipeline)
+  /// Upload recorded video file with metadata (v1.1 CR-01, CR-02, CR-03)
   static Future<Map<String, dynamic>> uploadVideo({
     required List<int> videoBytes,
     required String filename,
@@ -501,8 +868,13 @@ class ApiService {
     required double latitude,
     required double longitude,
     String? uploaderId,
-    bool licenseEnabled = true,
-    int licensePrice = 10000,
+    String locationDisplayMode = 'exact',
+    bool exactLocationConsented = false,
+    bool precisePermissionGranted = true,
+    bool isSensitivePlace = false,
+    bool supportEnabled = false,
+    String? capturedAt,
+    String displayTimezone = 'Asia/Seoul',
     int? recordedDuration,
     String? captureSessionId,
   }) async {
@@ -517,8 +889,15 @@ class ApiService {
       request.fields['latitude'] = latitude.toString();
       request.fields['longitude'] = longitude.toString();
       request.fields['uploader_id'] = uploaderId ?? currentUserId;
-      request.fields['license_enabled'] = licenseEnabled.toString();
-      request.fields['license_price'] = (licenseEnabled ? licensePrice : 0).toString();
+      request.fields['location_display_mode'] = locationDisplayMode;
+      request.fields['exact_location_consented'] = exactLocationConsented.toString();
+      request.fields['precise_permission_granted'] = precisePermissionGranted.toString();
+      request.fields['is_sensitive_place'] = isSensitivePlace.toString();
+      request.fields['support_enabled'] = supportEnabled.toString();
+      request.fields['display_timezone'] = displayTimezone;
+      if (capturedAt != null && capturedAt.isNotEmpty) {
+        request.fields['captured_at'] = capturedAt;
+      }
       if (recordedDuration != null) {
         request.fields['recorded_duration'] = recordedDuration.toString();
       }
@@ -554,6 +933,62 @@ class ApiService {
       }
     } catch (e) {
       return {'error': e.toString()};
+    }
+  }
+
+  /// Fetch other angles (nearby videos) for a given video
+  static Future<List<Map<String, dynamic>>> getVideoAngles(String videoId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/videos/${Uri.encodeComponent(videoId)}/angles'),
+      );
+      if (response.statusCode == 200) {
+        final decoded = json.decode(utf8.decode(response.bodyBytes)) as List<dynamic>;
+        return decoded
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /// Fetch admin settings
+  static Future<Map<String, dynamic>> getAdminSettings() async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/admin/settings'));
+      if (response.statusCode == 200) {
+        return json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  /// Update admin settings
+  static Future<Map<String, dynamic>> updateAdminSettings(Map<String, dynamic> updates) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/admin/settings'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(updates),
+      );
+      if (response.statusCode == 200) {
+        return json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  /// Delete a video owned by the current user
+  static Future<bool> deleteVideo(String videoId) async {
+    try {
+      final uid = Uri.encodeComponent(currentUserId);
+      final response = await http.delete(
+        Uri.parse('$baseUrl/videos/${Uri.encodeComponent(videoId)}?requester_id=$uid'),
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
     }
   }
 

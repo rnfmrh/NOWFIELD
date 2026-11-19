@@ -21,12 +21,75 @@ class User(Base):
     profile_image = Column(String(255), nullable=True)
     country = Column(String(10), default="KR", nullable=False)
     is_creator = Column(Boolean, default=True, nullable=False)
+    exact_location_consent = Column(Boolean, default=False, nullable=False)
+    exact_location_consented_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     # Relationships
     videos = relationship("Video", back_populates="uploader", cascade="all, delete-orphan")
-    purchased_licenses = relationship("LicenseTransaction", foreign_keys="LicenseTransaction.buyer_id", back_populates="buyer")
-    earned_licenses = relationship("LicenseTransaction", foreign_keys="LicenseTransaction.seller_id", back_populates="seller")
+    support_account = relationship(
+        "CreatorSupportAccount",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class CreatorSupportAccount(Base):
+    """
+    CR-01: External Creator Support Account (Ko-fi, Buy Me a Coffee, PayPal.Me, etc.)
+    NOWFIELD stores & verifies the external support URL only (0% platform fee, no internal wallet).
+    """
+    __tablename__ = "creator_support_accounts"
+
+    id = Column(String(50), primary_key=True, default=lambda: generate_uuid("sup_"))
+    user_id = Column(String(50), ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    provider = Column(String(30), default="kofi", nullable=False)  # kofi, buymeacoffee, paypal
+    support_url = Column(String(500), nullable=False)
+    ownership_status = Column(String(20), default="verified", nullable=False)  # verified, pending, unverified, disconnected
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    user = relationship("User", back_populates="support_account")
+
+
+class CaptureSession(Base):
+    """
+    Spec v1.1 Section 24: CaptureSession
+    id, user_id, video_id, started_at, ended_at, app_integrity_result, upload_token, original_hash
+    """
+    __tablename__ = "capture_sessions"
+
+    id = Column(String(64), primary_key=True, default=lambda: generate_uuid("cap_"))
+    user_id = Column(String(50), ForeignKey("users.id"), nullable=False, index=True)
+    video_id = Column(String(50), ForeignKey("videos.id"), nullable=True, index=True)
+    started_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    ended_at = Column(DateTime(timezone=True), default=utc_now, nullable=True)
+    app_integrity_result = Column(String(30), default="verified", nullable=False)
+    upload_token = Column(String(100), nullable=True)
+    original_hash = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class SupportLinkEvent(Base):
+    """
+    Spec v1.1 Section 24 & CR-01: SupportLinkEvent
+    id, video_id, creator_id, viewer_id, provider, clicked_at, session_id
+    Statistical click log only (NOT treated as completed donation or revenue).
+    """
+    __tablename__ = "support_link_events"
+
+    id = Column(String(50), primary_key=True, default=lambda: generate_uuid("sle_"))
+    video_id = Column(String(50), ForeignKey("videos.id"), nullable=False, index=True)
+    creator_id = Column(String(50), ForeignKey("users.id"), nullable=False, index=True)
+    viewer_id = Column(String(50), nullable=True, index=True)
+    provider = Column(String(30), default="kofi", nullable=False)
+    clicked_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    session_id = Column(String(64), nullable=True)
+
+
 
 class Video(Base):
     __tablename__ = "videos"
@@ -43,47 +106,41 @@ class Video(Base):
     height = Column(Integer, nullable=True)
     subtitles_json = Column(Text, nullable=True)
 
-    # Location Information
-    latitude = Column(Float, nullable=False)    # Exact GPS (internal storage only)
-    longitude = Column(Float, nullable=False)   # Exact GPS (internal storage only)
-    fuzzed_lat = Column(Float, nullable=False, index=True)  # Fuzzed public GPS (~150m grid)
-    fuzzed_lng = Column(Float, nullable=False, index=True)  # Fuzzed public GPS (~150m grid)
-    location_name = Column(String(100), nullable=False)     # Kakao Reverse Geocoded (e.g. 서울 강남구 신사동)
+    # CR-02: Location Information (Internal capture coords vs Public display coords separated)
+    capture_lat = Column(Float, nullable=False)   # Internal exact GPS only (never exposed to general user API)
+    capture_lng = Column(Float, nullable=False)   # Internal exact GPS only (never exposed to general user API)
+    latitude = Column(Float, nullable=False)      # Internal compatibility column (synced with capture_lat)
+    longitude = Column(Float, nullable=False)     # Internal compatibility column (synced with capture_lng)
+    location_display_mode = Column(String(20), default="exact", nullable=False, index=True)  # exact, approximate, hidden
+    display_lat = Column(Float, nullable=True, index=True)   # Public coordinate (None when hidden)
+    display_lng = Column(Float, nullable=True, index=True)   # Public coordinate (None when hidden)
+    fuzzed_lat = Column(Float, nullable=True, index=True)    # Public coordinate alias (None when hidden)
+    fuzzed_lng = Column(Float, nullable=True, index=True)    # Public coordinate alias (None when hidden)
+    approx_radius_m = Column(Integer, default=150, nullable=True)  # 100~200m nominal range when approximate
+    accuracy_m = Column(Float, default=10.0, nullable=True)
+    location_name = Column(String(100), nullable=False)      # Administrative name or '위치 미표시' when hidden
 
     # Product Integrity & Status
     status = Column(String(20), default="public", index=True)  # public, private, reported
     is_original_capture = Column(Boolean, default=True, nullable=False)  # One Take rule
     original_hash = Column(String(64), nullable=True)                    # Video integrity hash
 
-    # Economics & Engagement
-    license_price = Column(Integer, default=10000, nullable=False)  # Standard KRW 10,000
+    # CR-01: Creator Support & Engagement (License fields removed)
+    support_enabled = Column(Boolean, default=False, nullable=False)
+    support_click_count = Column(Integer, default=0, nullable=False)
     like_count = Column(Integer, default=0, nullable=False)
     comment_count = Column(Integer, default=0, nullable=False)
+
+    # CR-03: Separate Capture Timestamp vs Published Timestamp (UTC) + Display Timezone
+    captured_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    published_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+    display_timezone = Column(String(50), default="Asia/Seoul", nullable=False)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
 
     # Relationships
     uploader = relationship("User", back_populates="videos")
-    licenses = relationship("LicenseTransaction", back_populates="video", cascade="all, delete-orphan")
     reports = relationship("Report", back_populates="video", cascade="all, delete-orphan")
 
-class LicenseTransaction(Base):
-    __tablename__ = "license_transactions"
-
-    id = Column(String(50), primary_key=True, default=lambda: generate_uuid("lic_"))
-    video_id = Column(String(50), ForeignKey("videos.id"), nullable=False, index=True)
-    buyer_id = Column(String(50), ForeignKey("users.id"), nullable=False, index=True)
-    seller_id = Column(String(50), ForeignKey("users.id"), nullable=False, index=True)
-
-    total_amount = Column(Integer, default=10000, nullable=False)  # Total sales price
-    creator_payout = Column(Integer, default=8000, nullable=False) # 80% to creator
-    platform_fee = Column(Integer, default=2000, nullable=False)   # 20% to platform
-    status = Column(String(20), default="completed", nullable=False)
-    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
-
-    # Relationships
-    video = relationship("Video", back_populates="licenses")
-    buyer = relationship("User", foreign_keys=[buyer_id], back_populates="purchased_licenses")
-    seller = relationship("User", foreign_keys=[seller_id], back_populates="earned_licenses")
 
 class Report(Base):
     __tablename__ = "reports"
@@ -98,6 +155,7 @@ class Report(Base):
 
     # Relationships
     video = relationship("Video", back_populates="reports")
+
 
 class UserBlock(Base):
     __tablename__ = "user_blocks"

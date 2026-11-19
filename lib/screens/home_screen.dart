@@ -11,24 +11,8 @@ import 'earnings_screen.dart';
 import 'profile_screen.dart';
 import 'search_screen.dart';
 
-String formatVideoTimeAgo(dynamic createdAtRaw) {
-  if (createdAtRaw == null) return '방금 전';
-  final str = createdAtRaw.toString().trim();
-  if (str.isEmpty) return '방금 전';
-  if (str.contains('분 전') || str.contains('시간 전') || str.contains('ago') || str == '방금 전') {
-    return str;
-  }
-  try {
-    final normalized = str.endsWith('Z') || str.contains('+') ? str : '${str}Z';
-    final dt = DateTime.parse(normalized).toLocal();
-    final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return '방금 전';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}분 전';
-    if (diff.inHours < 24) return '${diff.inHours}시간 전';
-    return '${diff.inDays}일 전';
-  } catch (_) {
-    return '방금 전';
-  }
+String formatVideoTimeAgo(dynamic createdAtRaw, {String? timezone}) {
+  return ApiService.formatPublishedDateTime(createdAtRaw, timezone: timezone);
 }
 
 class VideoDetailScreen extends StatefulWidget {
@@ -438,7 +422,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                '글로벌 미디어·보도기관을 위한 실시간 현장 영상 라이선스 네트워크',
+                '글로벌 시청자를 위한 60초 원테이크 실시간 현장 기록 네트워크',
                 style: TextStyle(color: AppColors.textPrimary, fontSize: 17, fontWeight: FontWeight.bold, height: 1.35),
               ),
               const SizedBox(height: 6),
@@ -463,7 +447,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                   icon: const Icon(Icons.open_in_new_rounded, size: 18),
                   label: const Text(
-                    '자세히 알아보기 (수익 배분 구조)',
+                    '자세히 알아보기',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                 ),
@@ -570,6 +554,9 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
   late int _likeCount;
   late int _commentCount;
   String _captionLang = ApiService.defaultCaptionLangNotifier.value; // 원문, 영어, 일본어, 한국어, 꺼짐
+  List<Map<String, dynamic>> _nearbyAngles = [];
+
+  int get _otherAnglesCount => _nearbyAngles.length;
 
   @override
   void initState() {
@@ -578,6 +565,18 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
     _captionLang = (savedLang == 'Original') ? '원문' : (savedLang == 'Off' ? '꺼짐' : savedLang);
     _syncCountsFromData();
     _initVideoPlayer();
+    _fetchNearbyAngles();
+  }
+
+  Future<void> _fetchNearbyAngles() async {
+    final videoId = widget.videoData['id']?.toString();
+    if (videoId == null || videoId.isEmpty) return;
+    final angles = await ApiService.getVideoAngles(videoId);
+    if (mounted) {
+      setState(() {
+        _nearbyAngles = angles;
+      });
+    }
   }
 
   String _translateCaptionText(String raw, String lang) {
@@ -732,8 +731,18 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
   }
 
   void _showOriginalCaptureDialog(BuildContext context) {
-    final locationName = widget.videoData['location_name']?.toString() ?? '서울';
-    final createdAt = widget.videoData['created_at']?.toString() ?? '방금 전';
+    final locationMode = (widget.videoData['location_display_mode'] ?? 'exact').toString();
+    final locationName = locationMode == 'hidden'
+        ? '위치 미표시'
+        : (widget.videoData['location_name']?.toString() ?? '서울');
+    final privacyLabel = widget.videoData['location_privacy_label']?.toString() ??
+        ApiService.formatLocationPrivacyLabel(locationMode);
+    final tz = widget.videoData['display_timezone']?.toString() ?? 'Asia/Seoul';
+    final publishedRaw = widget.videoData['published_at'] ?? widget.videoData['created_at'];
+    final capturedRaw = widget.videoData['captured_at'] ?? publishedRaw;
+    final publishedStr = ApiService.formatPublishedDateTime(publishedRaw, timezone: tz);
+    final capturedStr = ApiService.formatPublishedDateTime(capturedRaw, timezone: tz);
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -751,10 +760,12 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
         ),
         content: Text(
           'NOWFIELD 현장 직찍 인증\n\n'
-          '• 촬영 위치: $locationName\n'
-          '• 게시 시각: $createdAt\n\n'
+          '• 공개 위치: $locationName\n'
+          '• 위치 공개 정밀도: $privacyLabel\n'
+          '• 촬영 시각: $capturedStr\n'
+          '• 게시 시각: $publishedStr\n\n'
           'NOWFIELD 앱 카메라에서 편집 없이 원테이크로 직접 촬영된 현장 영상입니다.',
-          style: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.45),
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.5),
         ),
         actions: [
           TextButton(
@@ -1114,14 +1125,37 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
     final index = widget.index;
     final title = videoData['title'] as String? ?? 'NOWFIELD Field Recording';
     final subtitleRaw = videoData['subtitle'] as String? ?? '';
-    final locationName = videoData['location_name'] as String? ?? 'Seoul';
+    final locationNameRaw = videoData['location_name'] as String? ?? 'Seoul';
+    final locationMode = (videoData['location_display_mode'] ?? 'exact').toString().toLowerCase();
+    final bool isHiddenLocation = locationMode == 'hidden';
+    final String locationName = isHiddenLocation ? '위치 미표시' : locationNameRaw;
+    final String privacyLabel = videoData['location_privacy_label']?.toString() ??
+        ApiService.formatLocationPrivacyLabel(locationMode);
+    final uploaderId = videoData['uploader_id']?.toString() ?? '';
     final uploaderName = videoData['uploader_name'] as String? ?? '@field_contributor';
-    final timeAgo = formatVideoTimeAgo(videoData['created_at'] ?? videoData['time']);
+    final tz = videoData['display_timezone']?.toString() ?? 'Asia/Seoul';
+    final publishedRaw = videoData['published_at'] ?? videoData['created_at'] ?? videoData['time'];
+    final publishedTimeStr = formatVideoTimeAgo(publishedRaw, timezone: tz);
+
+    // CR-01: Support button shown ONLY when support_enabled == true AND creator has verified support URL
+    final bool supportEnabled = videoData['support_enabled'] == true;
+    final cachedSupportAcc = ApiService.supportAccountsCacheNotifier.value[uploaderId];
+    final String creatorSupportUrl = (videoData['creator_support_url']?.toString().trim().isNotEmpty == true)
+        ? videoData['creator_support_url'].toString().trim()
+        : (cachedSupportAcc != null &&
+                cachedSupportAcc['active'] == true &&
+                cachedSupportAcc['ownership_status'] == 'verified'
+            ? (cachedSupportAcc['support_url']?.toString().trim() ?? '')
+            : '');
+    final String creatorSupportProvider = (videoData['creator_support_provider']?.toString() ??
+            cachedSupportAcc?['provider']?.toString() ??
+            'kofi')
+        .toUpperCase();
+    final bool showSupportButton = supportEnabled && creatorSupportUrl.isNotEmpty;
+
     final previewUrl = ApiService.resolveMediaUrl(
       (videoData['thumbnail_url'] ?? videoData['preview_url']) as String?,
     );
-    final likeCount = videoData['like_count']?.toString() ?? '0';
-    final commentCount = videoData['comment_count']?.toString() ?? '0';
 
     // Parse auto-subtitles if available
     String rawCaption = subtitleRaw.isNotEmpty ? subtitleRaw : title;
@@ -1390,49 +1424,71 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.location_on, size: 14, color: AppColors.accent),
+                              Icon(
+                                isHiddenLocation ? Icons.location_off_outlined : Icons.location_on,
+                                size: 14,
+                                color: isHiddenLocation ? AppColors.textMuted : AppColors.accent,
+                              ),
                               const SizedBox(width: 4),
                               Text(
-                                '$locationName · $timeAgo',
-                                style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+                                isHiddenLocation
+                                    ? '위치 미표시'
+                                    : locationName,
+                                style: const TextStyle(fontSize: 12.5, color: AppColors.textMuted),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.schedule_rounded, size: 13, color: Colors.white60),
+                              const SizedBox(width: 4),
+                              Text(
+                                publishedTimeStr,
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
                             ],
                           ),
                           // Spec #9 & #53.3: Multiple Angles
-                          GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () => _showMultipleAnglesSheet(context, locationName),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: AppColors.card.withOpacity(0.9),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: AppColors.accent.withOpacity(0.45), width: 0.8),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.switch_video_outlined, size: 12, color: AppColors.accent),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    '이 장소의 다른 시선 3개',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      color: AppColors.accent,
-                                      fontWeight: FontWeight.w700,
+                          if (!isHiddenLocation && _otherAnglesCount >= 1)
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => _showMultipleAnglesSheet(context, locationName),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: AppColors.card.withOpacity(0.9),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: AppColors.accent.withOpacity(0.45), width: 0.8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.switch_video_outlined, size: 12, color: AppColors.accent),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '이 장소의 다른 시선 $_otherAnglesCount개',
+                                      style: const TextStyle(
+                                        fontSize: 10.5,
+                                        color: AppColors.accent,
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
                         ],
                       ),
                     ],
                   ),
                 ),
 
-                // Right Actions
+                // Right Actions (Like, Comment, Share, Support [CR-01], More)
                 Positioned(
                   bottom: 16,
                   right: 10,
@@ -1458,6 +1514,21 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                         label: '공유',
                         onTap: () => _handleShare(context),
                       ),
+                      if (showSupportButton) ...[
+                        const SizedBox(height: 12),
+                        _buildActionIcon(
+                          icon: Icons.volunteer_activism_rounded,
+                          iconColor: AppColors.accent,
+                          label: '후원하기',
+                          onTap: () => _showCreatorSupportSheet(
+                            context,
+                            videoId: videoData['id']?.toString() ?? '',
+                            uploaderName: uploaderName,
+                            provider: creatorSupportProvider,
+                            supportUrl: creatorSupportUrl,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       IconButton(
                         icon: const Icon(Icons.more_horiz, color: AppColors.textPrimary, size: 28),
@@ -1797,7 +1868,25 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
   void _showMoreBottomSheet(BuildContext context) {
     final videoId = widget.videoData['id'] as String? ?? '';
     final uploaderName = widget.videoData['uploader_name'] as String? ?? '@user';
-    final licensePrice = widget.videoData['license_price'] ?? 10000;
+    final uploaderId = widget.videoData['uploader_id'] as String? ?? '';
+    final isMyVideo = uploaderId == ApiService.currentUserId ||
+        uploaderName == ApiService.currentUsername;
+
+    final bool supportEnabled = widget.videoData['support_enabled'] == true;
+    final cachedSupportAcc = ApiService.supportAccountsCacheNotifier.value[uploaderId];
+    final String creatorSupportUrl =
+        (widget.videoData['creator_support_url']?.toString().trim().isNotEmpty == true)
+            ? widget.videoData['creator_support_url'].toString().trim()
+            : (cachedSupportAcc != null &&
+                    cachedSupportAcc['active'] == true &&
+                    cachedSupportAcc['ownership_status'] == 'verified'
+                ? (cachedSupportAcc['support_url']?.toString().trim() ?? '')
+                : '');
+    final String creatorSupportProvider = (widget.videoData['creator_support_provider']?.toString() ??
+            cachedSupportAcc?['provider']?.toString() ??
+            'kofi')
+        .toUpperCase();
+    final bool showSupportOption = supportEnabled && creatorSupportUrl.isNotEmpty;
 
     showModalBottomSheet(
       context: context,
@@ -1819,7 +1908,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              if ((licensePrice is int ? licensePrice : int.tryParse('$licensePrice') ?? 0) > 0) ...[
+              if (showSupportOption) ...[
                 ListTile(
                   leading: Container(
                     padding: const EdgeInsets.all(6),
@@ -1827,10 +1916,10 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                       color: AppColors.accent.withOpacity(0.15),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.monetization_on_outlined, color: AppColors.accent, size: 24),
+                    child: const Icon(Icons.volunteer_activism_rounded, color: AppColors.accent, size: 22),
                   ),
                   title: const Text(
-                    '영상 라이선스 구매',
+                    '크리에이터 후원하기',
                     style: TextStyle(
                       color: AppColors.accent,
                       fontSize: 15,
@@ -1838,80 +1927,96 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                     ),
                   ),
                   subtitle: Text(
-                    '표준 판매가 ₩$licensePrice (크리에이터 80% 정산)',
+                    '$creatorSupportProvider 외부 후원 페이지로 이동 · 전액 크리에이터에게 전달',
                     style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                   ),
-                  trailing: const Icon(Icons.chevron_right, color: AppColors.accent),
+                  trailing: const Icon(Icons.open_in_new_rounded, color: AppColors.accent, size: 18),
                   onTap: () {
                     Navigator.pop(ctx);
-                    _showLicenseConfirmation(context, videoId, licensePrice);
+                    _showCreatorSupportSheet(
+                      context,
+                      videoId: videoId,
+                      uploaderName: uploaderName,
+                      provider: creatorSupportProvider,
+                      supportUrl: creatorSupportUrl,
+                    );
                   },
                 ),
                 const Divider(color: Colors.white12, height: 1),
-              ] else ...[
-                const ListTile(
-                  leading: Icon(Icons.money_off_csred_outlined, color: AppColors.textMuted, size: 22),
-                  title: Text(
-                    '라이선스 판매 비활성화',
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 14),
-                  ),
-                  subtitle: Text(
-                    '크리에이터가 이 영상의 라이선스 판매를 껐습니다.',
-                    style: TextStyle(color: Colors.white38, fontSize: 11),
-                  ),
-                ),
-                const Divider(color: Colors.white12, height: 1),
               ],
-              _buildBottomSheetItem(
-                Icons.bookmark_border,
-                '저장하기',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('영상이 북마크에 저장되었습니다.'),
-                      backgroundColor: AppColors.primary,
-                    ),
-                  );
-                },
-              ),
-              _buildBottomSheetItem(
-                Icons.report_outlined,
-                '신고하기',
-                color: Colors.redAccent,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showReportDialog(context, videoId);
-                },
-              ),
-              _buildBottomSheetItem(
-                Icons.block,
-                '$uploaderName 차단하기',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  ApiService.blockUser(uploaderName);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('$uploaderName 사용자를 차단하여 피드에서 제외했습니다. (설정 > 차단한 사용자에서 해제 가능)'),
-                      backgroundColor: AppColors.card,
-                    ),
-                  );
-                },
-              ),
-              _buildBottomSheetItem(
-                Icons.visibility_off_outlined,
-                '관심 없음',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  ApiService.markNotInterested(videoId);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('해당 영상을 피드에서 숨기고 유사 추천 노출을 줄입니다.'),
-                      backgroundColor: AppColors.card,
-                    ),
-                  );
-                },
-              ),
+              if (!isMyVideo) ...[
+                _buildBottomSheetItem(
+                  Icons.bookmark_border,
+                  '저장하기',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('영상이 북마크에 저장되었습니다.'),
+                        backgroundColor: AppColors.primary,
+                      ),
+                    );
+                  },
+                ),
+                _buildBottomSheetItem(
+                  Icons.report_outlined,
+                  '신고하기',
+                  color: Colors.redAccent,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showReportDialog(context, videoId);
+                  },
+                ),
+                _buildBottomSheetItem(
+                  Icons.block,
+                  '$uploaderName 차단하기',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    ApiService.blockUser(uploaderName);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('$uploaderName 사용자를 차단하여 피드에서 제외했습니다.'),
+                        backgroundColor: AppColors.card,
+                      ),
+                    );
+                  },
+                ),
+                _buildBottomSheetItem(
+                  Icons.visibility_off_outlined,
+                  '관심 없음',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    ApiService.markNotInterested(videoId);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('해당 영상을 피드에서 숨기고 유사 추천 노출을 줄입니다.'),
+                        backgroundColor: AppColors.card,
+                      ),
+                    );
+                  },
+                ),
+              ],
+              if (isMyVideo) ...[
+                const Divider(color: Colors.white12, height: 1),
+                _buildBottomSheetItem(
+                  Icons.my_location_rounded,
+                  '위치 공개 정밀도 변경',
+                  color: AppColors.accent,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showChangeLocationPrecisionDialog(context, videoId);
+                  },
+                ),
+                _buildBottomSheetItem(
+                  Icons.delete_outline,
+                  '내 영상 삭제',
+                  color: AppColors.danger,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showDeleteVideoConfirmation(context, videoId);
+                  },
+                ),
+              ],
               const SizedBox(height: 8),
             ],
           ),
@@ -1920,14 +2025,165 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
     );
   }
 
+  void _showChangeLocationPrecisionDialog(BuildContext parentContext, String videoId) {
+    String selectedMode = (widget.videoData['location_display_mode'] ?? 'exact').toString().toLowerCase();
+    showDialog(
+      context: parentContext,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            backgroundColor: AppColors.card,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(
+              children: [
+                Icon(Icons.my_location_rounded, color: AppColors.accent, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '위치 공개 정밀도 변경',
+                    style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RadioListTile<String>(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: AppColors.accent,
+                  title: const Text('정확한 위치', style: TextStyle(color: AppColors.textPrimary, fontSize: 13.5)),
+                  subtitle: const Text('촬영 지점에 정확한 지도 핀을 표시합니다.', style: TextStyle(color: AppColors.textMuted, fontSize: 11.5)),
+                  value: 'exact',
+                  groupValue: selectedMode,
+                  onChanged: (val) => setDialogState(() => selectedMode = val!),
+                ),
+                RadioListTile<String>(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: AppColors.accent,
+                  title: const Text('약 100~200m 범위', style: TextStyle(color: AppColors.textPrimary, fontSize: 13.5)),
+                  subtitle: const Text('100~200m 범위로 일반화된 고정 좌표를 표시합니다.', style: TextStyle(color: AppColors.textMuted, fontSize: 11.5)),
+                  value: 'approximate',
+                  groupValue: selectedMode,
+                  onChanged: (val) => setDialogState(() => selectedMode = val!),
+                ),
+                RadioListTile<String>(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: AppColors.accent,
+                  title: const Text('위치 미표시', style: TextStyle(color: AppColors.textPrimary, fontSize: 13.5)),
+                  subtitle: const Text('지도 핀과 위치를 공개하지 않습니다.', style: TextStyle(color: AppColors.textMuted, fontSize: 11.5)),
+                  value: 'hidden',
+                  groupValue: selectedMode,
+                  onChanged: (val) => setDialogState(() => selectedMode = val!),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('취소', style: TextStyle(color: AppColors.textMuted)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  if (selectedMode == 'exact' && !ApiService.exactLocationConsentNotifier.value) {
+                    await ApiService.recordExactLocationConsent(true);
+                  }
+                  if (mounted) {
+                    setState(() {
+                      widget.videoData['location_display_mode'] = selectedMode;
+                      widget.videoData['location_privacy_label'] = ApiService.formatLocationPrivacyLabel(selectedMode);
+                      if (selectedMode == 'hidden') {
+                        widget.videoData['location_name'] = '위치 미표시';
+                      }
+                    });
+                  }
+                  if (videoId.isNotEmpty) {
+                    final updated = await ApiService.updateVideoSettings(
+                      videoId: videoId,
+                      locationDisplayMode: selectedMode,
+                      exactLocationConsented: true,
+                    );
+                    if (mounted) {
+                      setState(() {
+                        widget.videoData.addAll(updated);
+                      });
+                    }
+                  }
+                  if (parentContext.mounted) {
+                    ScaffoldMessenger.of(parentContext).showSnackBar(
+                      SnackBar(
+                        content: Text('위치 공개 정밀도가 [${ApiService.formatLocationPrivacyLabel(selectedMode)}]로 변경되었습니다.'),
+                        backgroundColor: AppColors.primary,
+                      ),
+                    );
+                  }
+                },
+                child: const Text('변경 저장'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showDeleteVideoConfirmation(BuildContext parentContext, String videoId) {
+    showDialog(
+      context: parentContext,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.card,
+        title: const Text(
+          '영상 삭제',
+          style: TextStyle(color: AppColors.danger, fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          '이 영상을 영구적으로 삭제하시겠습니까?\n삭제된 영상은 복구할 수 없으며, Nearby 지도 핀 및 관련 댓글·좋아요 기록도 즉시 제거됩니다.',
+          style: TextStyle(color: AppColors.textPrimary, fontSize: 13.5, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final ok = await ApiService.deleteVideo(videoId);
+              if (parentContext.mounted) {
+                if (ok) {
+                  ScaffoldMessenger.of(parentContext).showSnackBar(
+                    const SnackBar(
+                      content: Text('영상이 삭제되었으며 Nearby 지도 핀에서도 즉시 제거되었습니다.'),
+                      backgroundColor: AppColors.danger,
+                    ),
+                  );
+                  Navigator.of(parentContext).pop();
+                } else {
+                  ScaffoldMessenger.of(parentContext).showSnackBar(
+                    const SnackBar(
+                      content: Text('영상 삭제에 실패했습니다. 본인의 영상만 삭제할 수 있습니다.'),
+                      backgroundColor: AppColors.card,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('영구 삭제'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Spec #9 & #53.3: Multiple Angles Bottom Sheet
   void _showMultipleAnglesSheet(BuildContext parentContext, String locationName) {
-    final rawPool = widget.allVideos ?? [widget.videoData];
-    final angles = rawPool
-        .whereType<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .take(4)
-        .toList();
+    final angles = _nearbyAngles;
 
     showModalBottomSheet(
       context: parentContext,
@@ -2122,89 +2378,182 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
     );
   }
 
-  void _showLicenseConfirmation(BuildContext context, String videoId, dynamic price) {
-    showDialog(
-      context: context,
+  /// CR-01: External Creator Support Sheet (0% platform fee, no digital perks, Apple 3.1.1(vii) & Google P2P compliant)
+  void _showCreatorSupportSheet(
+    BuildContext parentContext, {
+    required String videoId,
+    required String uploaderName,
+    required String provider,
+    required String supportUrl,
+  }) {
+    showModalBottomSheet(
+      context: parentContext,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: AppColors.card,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.verified, color: AppColors.accent, size: 22),
-              SizedBox(width: 8),
-              Text('라이선스 구매', style: TextStyle(color: AppColors.textPrimary, fontSize: 18)),
-            ],
-          ),
-          content: Text(
-            'NOWFIELD의 검증된 원본 촬영 영상을 보도 및 상업적 용도로 활용할 수 있는 사용권을 구매합니다.\n\n'
-            '• 판매 금액: ₩$price\n'
-            '• 크리에이터 정산(80%): ₩${(price * 0.8).toInt()}\n'
-            '• 플랫폼 수수료(20%): ₩${(price * 0.2).toInt()}',
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 14, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('취소', style: TextStyle(color: AppColors.textMuted)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: () async {
-                Navigator.pop(ctx);
-                await ApiService.purchaseLicense(videoId);
-                if (context.mounted) {
-                  // Spec #44: License purchased completion modal
-                  showDialog(
-                    context: context,
-                    builder: (doneCtx) => AlertDialog(
-                      backgroundColor: AppColors.card,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      title: Row(
-                        children: const [
-                          Icon(Icons.check_circle_rounded, color: AppColors.success, size: 24),
-                          SizedBox(width: 8),
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.accent.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.volunteer_activism_rounded, color: AppColors.accent, size: 22),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            '라이선스 구매 완료',
-                            style: TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+                            '$uploaderName 크리에이터 후원하기',
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '외부 후원 서비스 연동 · NOWFIELD 플랫폼 수수료 0%',
+                            style: const TextStyle(color: AppColors.accent, fontSize: 12, fontWeight: FontWeight.w600),
                           ),
                         ],
                       ),
-                      content: const Text(
-                        '이 영상의 상업적 사용권(표준 상업 라이선스)이 발급되었습니다.\n라이선스 관리 화면에서 언제든 확인하실 수 있습니다.',
-                        style: TextStyle(color: AppColors.textMuted, fontSize: 13.5, height: 1.45),
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(doneCtx),
-                          child: const Text('닫기', style: TextStyle(color: AppColors.textMuted)),
-                        ),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primary,
-                            foregroundColor: Colors.white,
-                          ),
-                          onPressed: () {
-                            Navigator.pop(doneCtx);
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const EarningsScreen(initialTabIndex: 1)),
-                            );
-                          },
-                          icon: const Icon(Icons.workspace_premium_outlined, size: 16),
-                          label: const Text('구매한 라이선스 보기'),
-                        ),
-                      ],
                     ),
-                  );
-                }
-              },
-              child: Text('구매 진행 (₩$price)'),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.background,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.cardBorder),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '• 후원금은 NOWFIELD를 거치지 않고 크리에이터의 외부 후원 계정으로 직접 전달됩니다.\n'
+                        '• 본 후원은 순수한 자발적 응원이며, 후원 여부에 따라 앱 내 디지털 기능·배지·전용 콘텐츠·우선 노출 등 어떠한 혜택도 제공되지 않습니다.\n'
+                        '• 결제 수단 수수료 및 환불·세금 처리는 연결된 외부 후원 서비스 정책을 따릅니다.',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 12.5, height: 1.5),
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.card,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.verified_user_outlined, color: AppColors.success, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                supportUrl,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 12.5,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.textPrimary,
+                          side: const BorderSide(color: AppColors.cardBorder),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: supportUrl));
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(parentContext).showSnackBar(
+                            SnackBar(
+                              content: Text('크리에이터 후원 주소가 복사되었습니다: $supportUrl'),
+                              backgroundColor: AppColors.card,
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.copy_rounded, size: 16),
+                        label: const Text('주소 복사', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          if (videoId.isNotEmpty) {
+                            await ApiService.recordSupportClick(videoId);
+                          }
+                          await Clipboard.setData(ClipboardData(text: supportUrl));
+                          if (parentContext.mounted) {
+                            ScaffoldMessenger.of(parentContext).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  '외부 후원 페이지로 연결합니다: $supportUrl',
+                                ),
+                                backgroundColor: AppColors.primary,
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.open_in_new_rounded, size: 17),
+                        label: const Text(
+                          '외부 후원 페이지 열기',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
-          ],
+          ),
         );
       },
     );
