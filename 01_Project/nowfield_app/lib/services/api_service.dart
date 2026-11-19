@@ -1,12 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'url_storage.dart';
 
 class ApiService {
   static const String defaultBaseUrl = 'http://127.0.0.1:8000';
 
   static final ValueNotifier<String> baseUrlNotifier =
-      ValueNotifier<String>(defaultBaseUrl);
+      ValueNotifier<String>(loadSavedBaseUrl() ?? defaultBaseUrl);
 
   static String get baseUrl => baseUrlNotifier.value;
 
@@ -14,7 +15,9 @@ class ApiService {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return;
     final normalized = trimmed.endsWith('/') ? trimmed.substring(0, trimmed.length - 1) : trimmed;
+    saveBaseUrlToStorage(normalized);
     baseUrlNotifier.value = normalized;
+    feedFilterVersionNotifier.value++;
   }
 
   /// Active logged-in user state (defaults to @seoul_walker per Spec #1 auto-login)

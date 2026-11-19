@@ -1379,9 +1379,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 if (newUrl.isNotEmpty) {
                   ApiService.setBaseUrl(newUrl);
                   Navigator.pop(ctx);
+                  _loadProfileData();
                   ScaffoldMessenger.of(parentContext).showSnackBar(
                     SnackBar(
-                      content: Text('API 서버 주소가 변경되었습니다:\n${ApiService.baseUrl}'),
+                      content: Text('API 서버 주소가 저장되어 변경되었습니다:\n${ApiService.baseUrl}'),
                       backgroundColor: AppColors.card,
                     ),
                   );
