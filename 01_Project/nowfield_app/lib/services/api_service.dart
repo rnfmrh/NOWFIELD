@@ -4,7 +4,12 @@ import 'package:http/http.dart' as http;
 import 'url_storage.dart';
 
 class ApiService {
-  static const String defaultBaseUrl = 'http://127.0.0.1:8000';
+  static String get defaultBaseUrl {
+    if (kIsWeb && Uri.base.scheme == 'http' && Uri.base.host.isNotEmpty) {
+      return 'http://${Uri.base.host}:8000';
+    }
+    return 'http://127.0.0.1:8000';
+  }
 
   static final ValueNotifier<String> baseUrlNotifier =
       ValueNotifier<String>(loadSavedBaseUrl() ?? defaultBaseUrl);
