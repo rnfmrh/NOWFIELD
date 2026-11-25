@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 venv/
 *.db
+.env
 
 # Flutter/Dart/Pub
 .dart_tool/
@@ -20,64 +21,22 @@ app.*.symbols
 app.*.map.json
 
 # Android
-/android/app/debug
-/android/app/profile
-/android/app/release
+**/android/app/debug
+**/android/app/profile
+**/android/app/release
 
-# IDE
+# IDE & OS
 .idea/
 .vscode/
 *.iml
 *.ipr
 *.iws
 .atom/
-
-# Miscellaneous
-*.class
-*.log
-*.swp
-*.swo
 .DS_Store
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
 Thumbs.db
-
-# Uploads
-01_Project/nowfield_backend/uploads/
-backend/uploads/
-
-# Admin settings (local config)
-01_Project/nowfield_backend/admin_settings.json
-backend/admin_settings.json
-
-# OMC
 .omc/
 
-# Track only 01_Project/nowfield_app and 01_Project/nowfield_backend in Git
-/02_*/
-/03_*/
-/.metadata
-/PROJECT_ANALYSIS.md
-/README.md
-/analysis_options.yaml
-/android/
-/assets/
-/backend/
-/ios/
-/lib/
-/linux/
-/macos/
-/pubspec.lock
-/pubspec.yaml
-/run_frontend.bat
-/scratch_spec.txt
-/test/
-/ui_concepts/
-/web/
-/web_dist/
-/windows/
-01_Project/nowfield_app/backend/
+# Uploads & Local Config
+nowfield_backend/uploads/
+nowfield_backend/admin_settings.json
+nowfield_app/backend/
