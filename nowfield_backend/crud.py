@@ -11,6 +11,7 @@ from kakao_service import (
     haversine_distance_meters,
     fuzz_coordinates,
     generate_approximate_coordinates,
+    fallback_korean_dong_name,
     kakao_service,
 )
 
@@ -61,6 +62,33 @@ def validate_support_url(provider: str, url: str) -> Tuple[bool, str, str]:
     return True, norm_provider, normalized_url
 
 
+def _normalize_location_dong_name(
+    raw_name: Optional[str],
+    lat: Optional[float],
+    lng: Optional[float],
+) -> str:
+    """
+    Ensure location_name is always a neighborhood (동) name (e.g., '서울 강남구 신사동')
+    and never raw decimal coordinates like '37.5204, 127.0229' or '위도 37.520'.
+    """
+    clean = (raw_name or "").strip()
+    if clean and clean != "위치 미표시":
+        # Check if it looks like raw coordinates (e.g. '37.5204, 127.0229' or '위도 37.520')
+        is_coord_like = clean.startswith("위도") or (
+            "," in clean
+            and all(
+                part.strip().replace(".", "").replace("-", "").isdigit()
+                for part in clean.split(",")
+                if part.strip()
+            )
+        )
+        if not is_coord_like:
+            return clean
+    if lat is not None and lng is not None:
+        return fallback_korean_dong_name(lat, lng)
+    return "서울 강남구 신사동"
+
+
 def _to_video_response(v: models.Video) -> schemas.VideoResponse:
     """
     CR-01, CR-02, CR-03: Convert ORM Video to public VideoResponse.
@@ -71,6 +99,9 @@ def _to_video_response(v: models.Video) -> schemas.VideoResponse:
     uploader = v.uploader
     uploader_name = uploader.username if uploader else "@anonymous"
     mode = (v.location_display_mode or "exact").lower()
+    cap_lat = v.capture_lat if v.capture_lat is not None else v.latitude
+    cap_lng = v.capture_lng if v.capture_lng is not None else v.longitude
+    resolved_dong = _normalize_location_dong_name(v.location_name, cap_lat, cap_lng)
 
     if mode == "hidden":
         disp_lat = None
@@ -81,14 +112,14 @@ def _to_video_response(v: models.Video) -> schemas.VideoResponse:
     elif mode == "approximate":
         disp_lat = v.display_lat if v.display_lat is not None else v.fuzzed_lat
         disp_lng = v.display_lng if v.display_lng is not None else v.fuzzed_lng
-        loc_name = v.location_name or "서울"
+        loc_name = resolved_dong
         loc_label = "약 100~200m 범위"
         approx_r = v.approx_radius_m or 150
     else:
         mode = "exact"
         disp_lat = v.display_lat if v.display_lat is not None else v.fuzzed_lat
         disp_lng = v.display_lng if v.display_lng is not None else v.fuzzed_lng
-        loc_name = v.location_name or "서울"
+        loc_name = resolved_dong
         loc_label = "정확한 위치"
         approx_r = None
 

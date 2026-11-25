@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import '../constants/app_colors.dart';
 import '../services/api_service.dart';
+import '../services/url_storage.dart';
 import 'earnings_screen.dart';
 
 class CameraScreen extends StatefulWidget {
@@ -328,6 +329,8 @@ class _CameraScreenState extends State<CameraScreen> {
 
     double lat = 37.5204;
     double lng = 127.0229;
+    String resolvedDongName = '서울 강남구 신사동';
+    bool hasResolvedLocation = false;
 
     bool isUploading = false;
     int uploadStep = 0; // 0: idle, 1: Uploading, 2: Preparing captions, 3: Checking safety, 4: Preparing field data
@@ -363,6 +366,23 @@ class _CameraScreenState extends State<CameraScreen> {
                   });
                 }
               });
+            }
+
+            if (!hasResolvedLocation) {
+              hasResolvedLocation = true;
+              () async {
+                final pos = await getCurrentBrowserPosition();
+                if (pos != null) {
+                  lat = pos['lat'] ?? lat;
+                  lng = pos['lng'] ?? lng;
+                }
+                final dong = await ApiService.resolveNeighborhoodName(lat, lng);
+                if (ctx.mounted) {
+                  setModalState(() {
+                    resolvedDongName = dong;
+                  });
+                }
+              }();
             }
 
             final bool canEnableSupport = linkedSupportAccount != null &&
@@ -514,6 +534,7 @@ class _CameraScreenState extends State<CameraScreen> {
                   subtitle: title,
                   latitude: lat,
                   longitude: lng,
+                  locationName: resolvedDongName,
                   uploaderId: ApiService.currentUserId,
                   locationDisplayMode: effectiveMode,
                   exactLocationConsented: exactLocationConsented,
@@ -939,9 +960,9 @@ class _CameraScreenState extends State<CameraScreen> {
                                       children: [
                                         Text(
                                           locationDisplayMode == 'exact'
-                                              ? '지도 핀 미리보기: 서울 강남구 신사동'
+                                              ? '지도 핀 미리보기: $resolvedDongName'
                                               : (locationDisplayMode == 'approximate'
-                                                  ? '지도 핀 미리보기: 서울 강남구 신사동 · 약 100~200m 일반화 핀'
+                                                  ? '지도 핀 미리보기: $resolvedDongName · 약 100~200m 일반화 핀'
                                                   : '지도 핀 미생성 · 피드 및 프로필에 위치 미표시'),
                                           style: const TextStyle(
                                             color: AppColors.textPrimary,

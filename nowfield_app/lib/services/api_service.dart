@@ -244,7 +244,12 @@ class ApiService {
             final next = Map<String, Map<String, dynamic>>.from(supportAccountsCacheNotifier.value);
             next[targetId] = decoded;
             supportAccountsCacheNotifier.value = next;
-            return decoded;
+            if (decoded['videos'] is List) {
+            decoded['videos'] = (decoded['videos'] as List)
+                .map((v) => v is Map ? _sanitizeVideoMap(Map<String, dynamic>.from(v)) : v)
+                .toList();
+          }
+          return decoded;
           }
         } else {
           final next = Map<String, Map<String, dynamic>>.from(supportAccountsCacheNotifier.value);
@@ -477,6 +482,11 @@ class ApiService {
                 Map<String, dynamic>.from(decoded['support_account'] as Map);
             supportAccountsCacheNotifier.value = next;
           }
+          if (decoded['videos'] is List) {
+            decoded['videos'] = (decoded['videos'] as List)
+                .map((v) => v is Map ? _sanitizeVideoMap(Map<String, dynamic>.from(v)) : v)
+                .toList();
+          }
           return decoded;
         }
       }
@@ -629,6 +639,26 @@ class ApiService {
     return {};
   }
 
+  static Map<String, dynamic> _sanitizeVideoMap(Map<String, dynamic> v) {
+    final mode = (v['location_display_mode'] ?? 'exact').toString().toLowerCase();
+    if (mode == 'hidden') {
+      v['location_name'] = '위치 미표시';
+      return v;
+    }
+    final lat = (v['display_lat'] ?? v['fuzzed_lat']) is num
+        ? ((v['display_lat'] ?? v['fuzzed_lat']) as num).toDouble()
+        : null;
+    final lng = (v['display_lng'] ?? v['fuzzed_lng']) is num
+        ? ((v['display_lng'] ?? v['fuzzed_lng']) as num).toDouble()
+        : null;
+    v['location_name'] = sanitizeLocationName(
+      v['location_name']?.toString(),
+      lat: lat,
+      lng: lng,
+    );
+    return v;
+  }
+
   /// CR-04: Get nearby videos along with clustered pins within 1km & 60-minute TTL
   static Future<Map<String, dynamic>> getNearbyData(
     double lat,
@@ -645,6 +675,37 @@ class ApiService {
       if (response.statusCode == 200) {
         final decoded = json.decode(utf8.decode(response.bodyBytes));
         if (decoded is Map<String, dynamic>) {
+          if (decoded['raw_videos'] is List) {
+            decoded['raw_videos'] = (decoded['raw_videos'] as List)
+                .map((e) => e is Map ? _sanitizeVideoMap(Map<String, dynamic>.from(e)) : e)
+                .toList();
+          }
+          if (decoded['clusters'] is List) {
+            decoded['clusters'] = (decoded['clusters'] as List).map((c) {
+              if (c is Map) {
+                final cm = Map<String, dynamic>.from(c);
+                final clat = cm['latitude'] is num ? (cm['latitude'] as num).toDouble() : null;
+                final clng = cm['longitude'] is num ? (cm['longitude'] as num).toDouble() : null;
+                cm['location_name'] = sanitizeLocationName(
+                  cm['location_name']?.toString(),
+                  lat: clat,
+                  lng: clng,
+                );
+                if (cm['videos'] is List) {
+                  cm['videos'] = (cm['videos'] as List)
+                      .map((v) => v is Map ? _sanitizeVideoMap(Map<String, dynamic>.from(v)) : v)
+                      .toList();
+                }
+                return cm;
+              }
+              return c;
+            }).toList();
+          }
+          if (decoded['videos'] is List) {
+            decoded['videos'] = (decoded['videos'] as List)
+                .map((v) => v is Map ? _sanitizeVideoMap(Map<String, dynamic>.from(v)) : v)
+                .toList();
+          }
           return decoded;
         }
       }
@@ -681,6 +742,11 @@ class ApiService {
             if (isUserBlocked(uname, uid)) return false;
           }
           return true;
+        }).map((item) {
+          if (item is Map) {
+            return _sanitizeVideoMap(Map<String, dynamic>.from(item));
+          }
+          return item;
         }).toList();
       }
     } catch (_) {}
@@ -703,6 +769,11 @@ class ApiService {
       if (response.statusCode == 200) {
         final decoded = json.decode(utf8.decode(response.bodyBytes));
         if (decoded is Map<String, dynamic>) {
+          if (decoded['videos'] is List) {
+            decoded['videos'] = (decoded['videos'] as List)
+                .map((v) => v is Map ? _sanitizeVideoMap(Map<String, dynamic>.from(v)) : v)
+                .toList();
+          }
           return decoded;
         }
       }
@@ -867,6 +938,93 @@ class ApiService {
     return {};
   }
 
+  /// Resolve (lat, lng) into a Korean neighborhood (동) name (e.g. '서울 강남구 신사동'),
+  /// never returning raw decimal coordinates.
+  static Future<String> resolveNeighborhoodName(double lat, double lng) async {
+    // 1. Try Kakao Maps JS SDK in browser
+    final fromJs = await reverseGeocodeWithKakaoJs(lat, lng);
+    if (fromJs != null && fromJs.isNotEmpty && !fromJs.contains(',')) {
+      return fromJs;
+    }
+
+    // 2. Try Backend /kakao/region endpoint
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/kakao/region?lat=$lat&lng=$lng'))
+          .timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final decoded = json.decode(utf8.decode(res.bodyBytes));
+        if (decoded is Map<String, dynamic>) {
+          final formatted = decoded['formatted_name']?.toString().trim() ?? '';
+          if (formatted.isNotEmpty && !formatted.contains(',') && !formatted.startsWith('위도')) {
+            return formatted;
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 3. Fallback to local Korean dong lookup
+    return formatNeighborhoodFallback(lat, lng);
+  }
+
+  /// Sanitize any location_name string so raw coordinates like '37.5204, 127.0229' are converted to dong names
+  static String sanitizeLocationName(String? rawName, {double? lat, double? lng}) {
+    final clean = (rawName ?? '').trim();
+    if (clean == '위치 미표시') return clean;
+    final bool isCoordLike = clean.isEmpty ||
+        clean.startsWith('위도') ||
+        RegExp(r'^-?\d+\.\d+\s*,\s*-?\d+\.\d+$').hasMatch(clean);
+    if (!isCoordLike) return clean;
+    if (lat != null && lng != null) {
+      return formatNeighborhoodFallback(lat, lng);
+    }
+    if (clean.contains(',')) {
+      final parts = clean.split(',');
+      final parsedLat = double.tryParse(parts[0].trim());
+      final parsedLng = parts.length > 1 ? double.tryParse(parts[1].trim()) : null;
+      if (parsedLat != null && parsedLng != null) {
+        return formatNeighborhoodFallback(parsedLat, parsedLng);
+      }
+    }
+    return '서울 강남구 신사동';
+  }
+
+  static String formatNeighborhoodFallback(double lat, double lng) {
+    const List<Map<String, dynamic>> dongs = [
+      {'name': '서울 강남구 신사동', 'lat': 37.5204, 'lng': 127.0229},
+      {'name': '서울 강남구 압구정동', 'lat': 37.5270, 'lng': 127.0284},
+      {'name': '서울 강남구 청담동', 'lat': 37.5240, 'lng': 127.0470},
+      {'name': '서울 강남구 논현동', 'lat': 37.5110, 'lng': 127.0310},
+      {'name': '서울 강남구 삼성동', 'lat': 37.5140, 'lng': 127.0565},
+      {'name': '서울 강남구 역삼동', 'lat': 37.5006, 'lng': 127.0365},
+      {'name': '서울 강남구 대치동', 'lat': 37.4945, 'lng': 127.0620},
+      {'name': '서울 서초구 잠원동', 'lat': 37.5180, 'lng': 127.0160},
+      {'name': '서울 서초구 반포동', 'lat': 37.5045, 'lng': 127.0048},
+      {'name': '서울 서초구 서초동', 'lat': 37.4915, 'lng': 127.0150},
+      {'name': '서울 서초구 양재동', 'lat': 37.4740, 'lng': 127.0380},
+      {'name': '서울 용산구 한남동', 'lat': 37.5345, 'lng': 127.0010},
+      {'name': '서울 용산구 이태원동', 'lat': 37.5345, 'lng': 126.9945},
+      {'name': '서울 성동구 성수동', 'lat': 37.5445, 'lng': 127.0560},
+      {'name': '서울 마포구 서교동', 'lat': 37.5540, 'lng': 126.9210},
+      {'name': '서울 마포구 연남동', 'lat': 37.5635, 'lng': 126.9245},
+      {'name': '서울 중구 명동', 'lat': 37.5635, 'lng': 126.9850},
+      {'name': '서울 송파구 잠실동', 'lat': 37.5130, 'lng': 127.1000},
+      {'name': '서울 영등포구 여의도동', 'lat': 37.5250, 'lng': 126.9260},
+    ];
+    String best = '서울 강남구 신사동';
+    double bestDistSq = double.infinity;
+    for (final d in dongs) {
+      final dLat = (d['lat'] as num).toDouble() - lat;
+      final dLng = (d['lng'] as num).toDouble() - lng;
+      final distSq = dLat * dLat + dLng * dLng;
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        best = d['name'] as String;
+      }
+    }
+    return best;
+  }
+
   /// Upload recorded video file with metadata (v1.1 CR-01, CR-02, CR-03)
   static Future<Map<String, dynamic>> uploadVideo({
     required List<int> videoBytes,
@@ -875,6 +1033,7 @@ class ApiService {
     String? subtitle,
     required double latitude,
     required double longitude,
+    String? locationName,
     String? uploaderId,
     String locationDisplayMode = 'exact',
     bool exactLocationConsented = false,
@@ -896,6 +1055,9 @@ class ApiService {
       }
       request.fields['latitude'] = latitude.toString();
       request.fields['longitude'] = longitude.toString();
+      if (locationName != null && locationName.trim().isNotEmpty) {
+        request.fields['location_name'] = locationName.trim();
+      }
       request.fields['uploader_id'] = uploaderId ?? currentUserId;
       request.fields['location_display_mode'] = locationDisplayMode;
       request.fields['exact_location_consented'] = exactLocationConsented.toString();

@@ -1,5 +1,7 @@
 // ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
+import 'dart:async';
 import 'dart:html' as html;
+import 'dart:js' as js;
 
 const String _storageKey = 'nowfield_api_base_url';
 
@@ -83,4 +85,41 @@ void saveBaseUrlToStorage(String url) {
     html.document.cookie =
         '$_storageKey=$encoded; path=/; max-age=31536000; SameSite=Lax';
   } catch (_) {}
+}
+
+/// Request current GPS position from browser geolocation API
+Future<Map<String, double>?> getCurrentBrowserPosition() async {
+  try {
+    final pos = await html.window.navigator.geolocation
+        .getCurrentPosition(enableHighAccuracy: true, timeout: const Duration(seconds: 5));
+    final coords = pos.coords;
+    if (coords != null && coords.latitude != null && coords.longitude != null) {
+      return {
+        'lat': coords.latitude!.toDouble(),
+        'lng': coords.longitude!.toDouble(),
+      };
+    }
+  } catch (_) {}
+  return null;
+}
+
+/// Reverse geocode (lat, lng) to Korean neighborhood (동) name via Kakao Maps JS SDK
+Future<String?> reverseGeocodeWithKakaoJs(double lat, double lng) async {
+  try {
+    if (!js.context.hasProperty('resolveKakaoDongName')) return null;
+    final completer = Completer<String?>();
+    js.context.callMethod('resolveKakaoDongName', [
+      lat,
+      lng,
+      (dynamic result) {
+        if (!completer.isCompleted) {
+          final str = result?.toString().trim() ?? '';
+          completer.complete(str.isNotEmpty ? str : null);
+        }
+      },
+    ]);
+    return await completer.future.timeout(const Duration(seconds: 3), onTimeout: () => null);
+  } catch (_) {
+    return null;
+  }
 }

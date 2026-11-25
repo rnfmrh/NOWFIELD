@@ -148,6 +148,37 @@
 
       return true;
     };
+
+    // Reverse geocode (lat, lng) -> Korean neighborhood (동) name using Kakao Maps Services SDK
+    window.resolveKakaoDongName = function(lat, lng, callback) {
+      try {
+        if (window.kakao && window.kakao.maps && window.kakao.maps.services) {
+          var geocoder = new kakao.maps.services.Geocoder();
+          geocoder.coord2RegionCode(lng, lat, function(result, status) {
+            if (status === kakao.maps.services.Status.OK && result && result.length > 0) {
+              var adm = result[0];
+              for (var i = 0; i < result.length; i++) {
+                if (result[i].region_type === 'H') {
+                  adm = result[i];
+                  break;
+                }
+              }
+              var d1 = (adm.region_1depth_name || '').replace('특별시', '').replace('광역시', '').replace('특별자치시', '').replace('특별자치도', '');
+              var d2 = adm.region_2depth_name || '';
+              var d3 = adm.region_3depth_name || '';
+              var formatted = (d1 + ' ' + d2 + ' ' + d3).replace(/\s+/g, ' ').trim();
+              if (formatted) {
+                callback(formatted);
+                return;
+              }
+            }
+            callback('');
+          });
+          return;
+        }
+      } catch (e) {}
+      callback('');
+    };
   </script>
 </head>
 <body>

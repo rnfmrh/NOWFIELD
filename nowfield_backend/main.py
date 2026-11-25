@@ -125,6 +125,12 @@ def _ensure_db_migrations():
             conn.execute(
                 text("UPDATE videos SET captured_at = created_at WHERE captured_at IS NULL")
             )
+            conn.execute(
+                text(
+                    "UPDATE videos SET location_name = '서울 강남구 신사동' "
+                    "WHERE location_name LIKE '%,%' OR location_name LIKE '위도%'"
+                )
+            )
 
 
 _ensure_db_migrations()
@@ -355,6 +361,7 @@ async def upload_video_file(
     support_enabled: bool = Form(False, description="CR-01: Enable creator support button on this video"),
     captured_at: Optional[str] = Form(None, description="CR-03: Original capture UTC ISO-8601 timestamp"),
     display_timezone: str = Form("Asia/Seoul", description="CR-03: IANA timezone for published_at display"),
+    location_name: Optional[str] = Form(None, description="Resolved neighborhood (동) name from client"),
     recorded_duration: Optional[int] = Form(None, description="Client recorded duration in seconds"),
     capture_session_id: Optional[str] = Form(None, description="Capture session identifier"),
     db: Session = Depends(get_db),
@@ -403,8 +410,11 @@ async def upload_video_file(
         processed_path, file_id, clean_title, subtitle, float(effective_duration)
     )
 
-    region_info = await kakao_service.coord_to_region(latitude, longitude)
-    location_name = region_info.get("formatted_name") or f"위도 {latitude:.3f}"
+    if location_name and location_name.strip() and not ("," in location_name or location_name.startswith("위도")):
+        resolved_location_name = location_name.strip()
+    else:
+        region_info = await kakao_service.coord_to_region(latitude, longitude)
+        resolved_location_name = region_info.get("formatted_name") or crud._normalize_location_dong_name(None, latitude, longitude)
 
     uploader = crud.get_user(db, uploader_id)
     if not uploader:
@@ -434,7 +444,7 @@ async def upload_video_file(
         subtitles_json=subtitles_json,
         latitude=latitude,
         longitude=longitude,
-        location_name=location_name,
+        location_name=resolved_location_name,
         original_hash=sha256_hash,
         location_display_mode=location_display_mode,
         exact_location_consented=exact_location_consented,
@@ -452,7 +462,7 @@ async def upload_video_file(
 @app.post("/videos", response_model=schemas.VideoResponse)
 async def upload_video_json(video_in: schemas.VideoCreate, db: Session = Depends(get_db)):
     region_info = await kakao_service.coord_to_region(video_in.latitude, video_in.longitude)
-    location_name = region_info.get("formatted_name") or f"위도 {video_in.latitude:.3f}"
+    location_name = region_info.get("formatted_name") or crud._normalize_location_dong_name(None, video_in.latitude, video_in.longitude)
 
     video = crud.create_video(db, video_in, location_name)
     return crud._to_video_response(video)
