@@ -30,6 +30,13 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _useSimulationAfterDenied = true; // Web fallback toggle for Spec #51.4
   XFile? _recordedVideo;
 
+  // Mobile Camera Zoom state (Pinch-to-Zoom + 1x/2x/3x quick presets)
+  double _currentZoomLevel = 1.0;
+  double _baseZoomLevel = 1.0;
+  double _minAvailableZoom = 1.0;
+  double _maxAvailableZoom = 5.0;
+  bool _supportsHardwareZoom = false;
+
   // Spec #4 Metadata: Capture Session ID & Start/End timestamps
   String _captureSessionId = '';
   DateTime? _captureStartTime;
@@ -50,7 +57,10 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _initCamera({int cameraIndex = 0}) async {
     try {
-      _cameras ??= await availableCameras();
+      if (_cameras == null) {
+        final allCameras = await availableCameras();
+        _cameras = _filterMainFrontAndBackCameras(allCameras);
+      }
       if (_cameras != null && _cameras!.isNotEmpty) {
         final idx = cameraIndex % _cameras!.length;
         _selectedCameraIdx = idx;
@@ -65,6 +75,7 @@ class _CameraScreenState extends State<CameraScreen> {
         );
         _controller = controller;
         await controller.initialize();
+        await _initZoomBounds(controller);
         if (!mounted) return;
         setState(() {
           _hasCameraError = false;
@@ -74,6 +85,76 @@ class _CameraScreenState extends State<CameraScreen> {
       }
     } catch (_) {
       if (mounted) setState(() => _hasCameraError = true);
+    }
+  }
+
+  /// Filter device camera list to at most 2 cameras: 1 main rear camera + 1 main front camera.
+  List<CameraDescription> _filterMainFrontAndBackCameras(List<CameraDescription> allCameras) {
+    if (allCameras.length <= 2) return allCameras;
+
+    CameraDescription? mainBack;
+    CameraDescription? mainFront;
+
+    for (final cam in allCameras) {
+      if (mainBack == null && cam.lensDirection == CameraLensDirection.back) {
+        mainBack = cam;
+      } else if (mainFront == null && cam.lensDirection == CameraLensDirection.front) {
+        mainFront = cam;
+      }
+      if (mainBack != null && mainFront != null) break;
+    }
+
+    // Fallback for desktop/web cameras labeled 'external' when back/front aren't explicitly set
+    if (mainBack == null && allCameras.isNotEmpty) {
+      mainBack = allCameras.first;
+    }
+    if (mainFront == null && allCameras.length > 1) {
+      mainFront = allCameras.firstWhere(
+        (c) => c != mainBack,
+        orElse: () => allCameras[1],
+      );
+    }
+
+    return [
+      if (mainBack != null) mainBack,
+      if (mainFront != null && mainFront != mainBack) mainFront,
+    ];
+  }
+
+  /// Initialize zoom bounds for the active mobile camera lens
+  Future<void> _initZoomBounds(CameraController controller) async {
+    _currentZoomLevel = 1.0;
+    _baseZoomLevel = 1.0;
+    try {
+      final minZ = await controller.getMinZoomLevel();
+      final maxZ = await controller.getMaxZoomLevel();
+      _minAvailableZoom = minZ >= 1.0 ? minZ : 1.0;
+      _maxAvailableZoom = maxZ > _minAvailableZoom ? maxZ.clamp(2.0, 8.0) : 5.0;
+      _supportsHardwareZoom = maxZ > minZ;
+      if (_supportsHardwareZoom) {
+        await controller.setZoomLevel(_currentZoomLevel.clamp(minZ, maxZ));
+      }
+    } catch (_) {
+      _minAvailableZoom = 1.0;
+      _maxAvailableZoom = 5.0;
+      _supportsHardwareZoom = false;
+    }
+  }
+
+  /// Set zoom level via pinch gesture or quick preset buttons (1x, 2x, 3x)
+  Future<void> _setZoomLevel(double targetZoom) async {
+    final clamped = targetZoom.clamp(_minAvailableZoom, _maxAvailableZoom);
+    if ((clamped - _currentZoomLevel).abs() < 0.01) return;
+    setState(() {
+      _currentZoomLevel = clamped;
+    });
+    if (_controller != null && _controller!.value.isInitialized) {
+      try {
+        await _controller!.setZoomLevel(clamped);
+        _supportsHardwareZoom = true;
+      } catch (_) {
+        _supportsHardwareZoom = false;
+      }
     }
   }
 
@@ -107,12 +188,33 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
-  /// Spec #3: Switch Front / Rear Camera
+  /// Spec #3: Switch Front / Rear Camera (allowed both before and during recording)
   Future<void> _switchCamera() async {
-    if (_isRecording) return;
     if (_cameras != null && _cameras!.length > 1) {
       final nextIdx = (_selectedCameraIdx + 1) % _cameras!.length;
-      await _initCamera(cameraIndex: nextIdx);
+      if (_isRecording && _controller != null && _controller!.value.isInitialized) {
+        final nextDesc = _cameras![nextIdx];
+        try {
+          await _controller!.setDescription(nextDesc);
+          await _initZoomBounds(_controller!);
+          _selectedCameraIdx = nextIdx;
+          if (mounted) {
+            setState(() {
+              _isFrontCamera = nextDesc.lensDirection == CameraLensDirection.front;
+            });
+          }
+        } catch (_) {
+          // Fallback if browser/platform requires re-initializing the stream while recording
+          await _initCamera(cameraIndex: nextIdx);
+          try {
+            if (_controller != null && _controller!.value.isInitialized) {
+              await _controller!.startVideoRecording();
+            }
+          } catch (_) {}
+        }
+      } else {
+        await _initCamera(cameraIndex: nextIdx);
+      }
     } else {
       setState(() {
         _isFrontCamera = !_isFrontCamera;
@@ -192,6 +294,7 @@ class _CameraScreenState extends State<CameraScreen> {
   void _handleRetake() {
     _timer?.cancel();
     _generateNewCaptureSession();
+    _setZoomLevel(1.0);
     setState(() {
       _isRecording = false;
       _isReviewing = false;
@@ -209,7 +312,7 @@ class _CameraScreenState extends State<CameraScreen> {
   /// - CR-01: License sales removed; replaced with per-video `후원 버튼 표시` (`support_enabled`) toggle (default OFF, requires verified support URL).
   /// - CR-03: Passes separate `captured_at` & `display_timezone`.
   void _showPublishBottomSheet(XFile? file, int durationSec) {
-    final titleController = TextEditingController(text: '서울 강남구 신사동 가로수길 실시간 인파 현황');
+    final titleController = TextEditingController();
 
     // CR-02: Default selection is 'exact' (Exact Location), subject to explicit consent & OS precise permission
     String locationDisplayMode = 'exact'; // 'exact', 'approximate', 'hidden'
@@ -682,30 +785,6 @@ class _CameraScreenState extends State<CameraScreen> {
                             borderRadius: BorderRadius.circular(10),
                             borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-
-                      // Quick preset chips for easy testing
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: [
-                            _buildQuickTitleChip('신사동 가로수길 실시간 인파 현황', (val) {
-                              titleController.text = val;
-                              setModalState(() {});
-                            }),
-                            const SizedBox(width: 6),
-                            _buildQuickTitleChip('강남역 사거리 퇴근길 교통 상황', (val) {
-                              titleController.text = val;
-                              setModalState(() {});
-                            }),
-                            const SizedBox(width: 6),
-                            _buildQuickTitleChip('한강공원 반포지구 현재 날씨 및 산책로', (val) {
-                              titleController.text = val;
-                              setModalState(() {});
-                            }),
-                          ],
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -1222,24 +1301,6 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  Widget _buildQuickTitleChip(String label, ValueChanged<String> onSelect) {
-    return GestureDetector(
-      onTap: () => onSelect(label),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: AppColors.background,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.cardBorder),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-        ),
-      ),
-    );
-  }
-
   Widget _buildRadioOption({
     required String label,
     required bool selected,
@@ -1292,6 +1353,68 @@ class _CameraScreenState extends State<CameraScreen> {
     return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 
+  /// Mobile-native style zoom bar (`1x`, `2x`, `3x`) + current pinch zoom indicator
+  Widget _buildMobileZoomBar() {
+    final List<double> presets = [
+      1.0,
+      if (_maxAvailableZoom >= 2.0) 2.0,
+      if (_maxAvailableZoom >= 3.0) 3.0,
+    ];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.subtitleBackground,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white24, width: 0.8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: presets.map((preset) {
+          // Determine if this preset is the active range
+          final bool isSelected;
+          if (preset == 1.0) {
+            isSelected = _currentZoomLevel < 1.5;
+          } else if (preset == 2.0) {
+            isSelected = _currentZoomLevel >= 1.5 && _currentZoomLevel < 2.5;
+          } else {
+            isSelected = _currentZoomLevel >= 2.5;
+          }
+
+          final String label = isSelected
+              ? '${_currentZoomLevel.toStringAsFixed(_currentZoomLevel % 1 == 0 ? 0 : 1)}x'
+              : '${preset.toInt()}x';
+
+          return GestureDetector(
+            onTap: () => _setZoomLevel(preset),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              width: isSelected ? 40 : 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.white.withOpacity(0.22) : Colors.transparent,
+                shape: BoxShape.circle,
+                border: isSelected
+                    ? Border.all(color: AppColors.warning, width: 1.2)
+                    : null,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? AppColors.warning : Colors.white,
+                  fontSize: isSelected ? 12 : 11,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isCameraReady =
@@ -1303,10 +1426,25 @@ class _CameraScreenState extends State<CameraScreen> {
         fit: StackFit.expand,
         children: [
           // 1. Camera Preview or Simulated Viewfinder / Permission Denied UI (Spec #33 & #51.4)
-          if (isCameraReady)
-            Center(child: CameraPreview(_controller!))
-          else
-            _buildSimulatedViewfinder(),
+          // Wrapped with mobile pinch-to-zoom GestureDetector
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onScaleStart: (_) {
+              _baseZoomLevel = _currentZoomLevel;
+            },
+            onScaleUpdate: (details) {
+              if (_isReviewing) return;
+              _setZoomLevel(_baseZoomLevel * details.scale);
+            },
+            child: ClipRect(
+              child: Transform.scale(
+                scale: _supportsHardwareZoom ? 1.0 : _currentZoomLevel,
+                child: isCameraReady
+                    ? Center(child: CameraPreview(_controller!))
+                    : _buildSimulatedViewfinder(),
+              ),
+            ),
+          ),
 
           // 2. Top Controls (Spec #33: [× / One Take Only] ... [Camera Switch / ⚡ Flash])
           Positioned(
@@ -1368,7 +1506,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       child: IconButton(
                         tooltip: '전/후면 카메라 전환',
                         icon: const Icon(Icons.cameraswitch_rounded, color: Colors.white, size: 22),
-                        onPressed: _isRecording ? null : _switchCamera,
+                        onPressed: _isReviewing ? null : _switchCamera,
                       ),
                     ),
                     // Flash Toggle (⚡)
@@ -1403,13 +1541,16 @@ class _CameraScreenState extends State<CameraScreen> {
           if (_isReviewing)
             _buildPostRecordingReviewOverlay()
           else
-            // 4. Bottom Controls (00:23 / 01:00 Timer & Record Shutter, Spec #33)
+            // 4. Bottom Controls (Zoom Selector, 00:23 / 01:00 Timer & Record Shutter, Spec #33)
             Positioned(
               bottom: 36,
               left: 24,
               right: 24,
               child: Column(
                 children: [
+                  // Mobile Quick Zoom Bar (1x / 2x / 3x + live pinch zoom indicator)
+                  _buildMobileZoomBar(),
+                  const SizedBox(height: 12),
                   // 60s Progress Bar when recording
                   if (_isRecording) ...[
                     ClipRRect(
