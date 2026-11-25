@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
@@ -7,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import '../constants/app_colors.dart';
 import '../services/api_service.dart';
+import '../widgets/web_ad_slot_view.dart';
 import 'earnings_screen.dart';
 import 'profile_screen.dart';
 import 'search_screen.dart';
@@ -145,6 +147,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<dynamic> _videos = [];
+  List<Map<String, dynamic>> _adCampaigns = [];
+  List<Map<String, dynamic>> _feedEntries = []; // Interleaved videos + native web ads every N videos
   bool _isLoading = true;
   String _selectedTab = 'recommended'; // Spec #6: recommended, latest, following
 
@@ -164,10 +168,50 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadFeed() async {
-    final list = await ApiService.getFeedVideos(tab: _selectedTab);
+    final results = await Future.wait([
+      ApiService.getFeedVideos(tab: _selectedTab),
+      ApiService.getAdCampaigns(),
+      ApiService.getAdStats(),
+    ]);
+    final list = results[0] as List<dynamic>;
+    final ads = results[1] as List<Map<String, dynamic>>;
+    final interval = ApiService.feedAdIntervalNotifier.value.clamp(2, 10);
+
+    // Interleave an ad slot after every `interval` videos (e.g., every 3 videos)
+    final entries = <Map<String, dynamic>>[];
+    int adCursor = 0;
+    for (int i = 0; i < list.length; i++) {
+      final v = list[i];
+      if (v is Map) {
+        entries.add({
+          'type': 'video',
+          'videoIndex': i,
+          'data': Map<String, dynamic>.from(v),
+        });
+      }
+      if ((i + 1) % interval == 0 && ads.isNotEmpty) {
+        entries.add({
+          'type': 'ad',
+          'slotIndex': adCursor,
+          'data': ads[adCursor % ads.length],
+        });
+        adCursor++;
+      }
+    }
+    // Always ensure at least one ad slot appears even if total videos < interval
+    if (entries.isNotEmpty && adCursor == 0 && ads.isNotEmpty) {
+      entries.add({
+        'type': 'ad',
+        'slotIndex': 0,
+        'data': ads.first,
+      });
+    }
+
     if (mounted) {
       setState(() {
         _videos = list;
+        _adCampaigns = ads;
+        _feedEntries = entries;
         _isLoading = false;
       });
     }
@@ -243,14 +287,18 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       child: PageView.builder(
                         scrollDirection: Axis.vertical,
-                        itemCount: _videos.length + 1,
+                        itemCount: _feedEntries.length,
                         itemBuilder: (context, index) {
-                          if (index == _videos.length) {
-                            return _buildSponsoredAdCard(context);
+                          final entry = _feedEntries[index];
+                          if (entry['type'] == 'ad') {
+                            return NativeFeedAdItem(
+                              adData: entry['data'] as Map<String, dynamic>,
+                              slotIndex: (entry['slotIndex'] as int?) ?? 0,
+                            );
                           }
                           return VideoFeedItem(
-                            index: index,
-                            videoData: _videos[index] as Map<String, dynamic>,
+                            index: (entry['videoIndex'] as int?) ?? index,
+                            videoData: entry['data'] as Map<String, dynamic>,
                             allVideos: _videos,
                           );
                         },
@@ -359,14 +407,111 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
 
-  Widget _buildSponsoredAdCard(BuildContext context) {
+/// Native Feed Ad Slot (interleaved every N videos) supporting Kakao AdFit / Google AdSense web tags
+/// and real-time 30% Creator Pool revenue accumulation on impression & click.
+class NativeFeedAdItem extends StatefulWidget {
+  final Map<String, dynamic> adData;
+  final int slotIndex;
+
+  const NativeFeedAdItem({
+    super.key,
+    required this.adData,
+    required this.slotIndex,
+  });
+
+  @override
+  State<NativeFeedAdItem> createState() => _NativeFeedAdItemState();
+}
+
+class _NativeFeedAdItemState extends State<NativeFeedAdItem> {
+  Timer? _impressionTimer;
+  bool _impressionRecorded = false;
+  int _lastAddedPoolKrw = 0;
+
+  String get _adId => widget.adData['id']?.toString() ?? 'ad_kakao_adfit_1';
+  String get _network => (widget.adData['network']?.toString() ?? 'adfit').toLowerCase();
+  String get _adUnitId => widget.adData['ad_unit_id']?.toString() ?? 'DAN-NOWFIELD01';
+
+  @override
+  void initState() {
+    super.initState();
+    // Record an ad impression after 1.2s of active view in the feed
+    _impressionTimer = Timer(const Duration(milliseconds: 1200), _recordImpression);
+  }
+
+  @override
+  void dispose() {
+    _impressionTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _recordImpression() async {
+    if (!mounted || _impressionRecorded) return;
+    _impressionRecorded = true;
+    final res = await ApiService.recordAdEvent(adId: _adId, eventType: 'impression');
+    if (mounted) {
+      setState(() {
+        _lastAddedPoolKrw = (res['added_creator_pool_krw'] as num?)?.toInt() ?? 15;
+      });
+    }
+  }
+
+  Future<void> _handleAdClick() async {
+    final res = await ApiService.recordAdEvent(adId: _adId, eventType: 'click');
+    final addedPool = (res['added_creator_pool_krw'] as num?)?.toInt() ?? 105;
+    final totalPool = (res['total_creator_pool_krw'] as num?)?.toInt() ??
+        ApiService.creatorPoolRevenueNotifier.value;
+
+    if (!mounted) return;
+    setState(() {
+      _lastAddedPoolKrw = addedPool;
+    });
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: AppColors.card,
+        duration: const Duration(seconds: 2),
+        content: Row(
+          children: [
+            const Icon(Icons.monetization_on_rounded, color: AppColors.accent, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '광고 클릭 수익의 30% (+₩$addedPool)가 크리에이터 풀에 적립되었습니다 · 총 ₩$totalPool',
+                style: const TextStyle(color: AppColors.textPrimary, fontSize: 12.5),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const EarningsScreen(initialTabIndex: 0)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sponsorName = widget.adData['sponsor_name']?.toString() ?? 'Kakao AdFit · 로컬 현장 네트워크';
+    final title = widget.adData['title']?.toString() ?? '내 주변 실시간 핫플레이스 & 로컬 브랜드 캠페인';
+    final desc = widget.adData['description']?.toString() ??
+        '카카오 애드핏 및 Google AdSense 웹 광고 네트워크 연동 슬롯입니다. 확정 광고 순수익의 30%가 크리에이터 풀에 실시간 적립됩니다.';
+    final imageUrl = widget.adData['image_url']?.toString() ??
+        'https://picsum.photos/seed/nowfield_adfit1/800/450';
+    final ctaLabel = widget.adData['cta_label']?.toString() ?? '자세히 알아보기';
+    final networkBadge = _network == 'adsense' ? 'Google AdSense' : 'Kakao AdFit';
+    final adStats = ApiService.adStatsCacheNotifier.value;
+
     return Container(
       color: AppColors.background,
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 80),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 72),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
             color: AppColors.card,
             borderRadius: BorderRadius.circular(20),
@@ -382,55 +527,118 @@ class _HomeScreenState extends State<HomeScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.warning.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.warning, width: 0.8),
-                    ),
-                    child: const Text(
-                      '광고 · 스폰서',
-                      style: TextStyle(color: AppColors.warning, fontSize: 11, fontWeight: FontWeight.bold),
-                    ),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.warning.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.warning, width: 0.8),
+                        ),
+                        child: Text(
+                          '광고 · $networkBadge',
+                          style: const TextStyle(
+                            color: AppColors.warning,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      if (_impressionRecorded) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.success.withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '+₩$_lastAddedPoolKrw 풀 적립됨',
+                            style: const TextStyle(
+                              color: AppColors.success,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  const Text(
-                    '광고 순수익 30% 크리에이터 풀 배분',
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                  ValueListenableBuilder<int>(
+                    valueListenable: ApiService.creatorPoolRevenueNotifier,
+                    builder: (_, poolKrw, __) {
+                      return Text(
+                        '크리에이터 풀 ₩$poolKrw',
+                        style: const TextStyle(
+                          color: AppColors.accent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Image.network(
-                  'https://picsum.photos/seed/nowfield_ad/800/450',
-                  height: 190,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                    height: 190,
-                    color: AppColors.background,
-                    child: const Center(child: Icon(Icons.campaign_outlined, color: AppColors.accent, size: 48)),
+              const SizedBox(height: 14),
+              // Web Ad Network Slot (Kakao AdFit / Google AdSense tag or native fallback banner)
+              SizedBox(
+                height: 195,
+                width: double.infinity,
+                child: WebAdSlotView(
+                  network: _network,
+                  adUnitId: adStats['adfit_unit_id']?.toString().isNotEmpty == true
+                      ? adStats['adfit_unit_id'].toString()
+                      : _adUnitId,
+                  adsenseClientId: adStats['adsense_client_id']?.toString(),
+                  adsenseSlotId: adStats['adsense_slot_id']?.toString(),
+                  fallbackChild: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.network(
+                      imageUrl,
+                      height: 195,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        height: 195,
+                        color: AppColors.background,
+                        child: const Center(
+                          child: Icon(Icons.campaign_outlined, color: AppColors.accent, size: 48),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              const Text(
-                '나우필드 미디어 파트너',
-                style: TextStyle(color: AppColors.accent, fontSize: 12.5, fontWeight: FontWeight.bold),
+              const SizedBox(height: 14),
+              Text(
+                sponsorName,
+                style: const TextStyle(
+                  color: AppColors.accent,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 4),
-              const Text(
-                '글로벌 시청자를 위한 60초 원테이크 실시간 현장 기록 네트워크',
-                style: TextStyle(color: AppColors.textPrimary, fontSize: 17, fontWeight: FontWeight.bold, height: 1.35),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  height: 1.35,
+                ),
               ),
               const SizedBox(height: 6),
-              const Text(
-                '일반 현장 영상과 명확히 구분되는 네이티브 광고 슬롯입니다. 확정 광고 순수익의 30%는 크리에이터 풀에 적립되어 시청 품질 기준으로 배분됩니다.',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 12.5, height: 1.45),
+              Text(
+                desc,
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12.5,
+                  height: 1.45,
+                ),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 height: 46,
@@ -440,15 +648,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const EarningsScreen(initialTabIndex: 0)),
-                    );
-                  },
+                  onPressed: _handleAdClick,
                   icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                  label: const Text(
-                    '자세히 알아보기',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  label: Text(
+                    ctaLabel,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                 ),
               ),

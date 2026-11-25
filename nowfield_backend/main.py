@@ -21,6 +21,11 @@ DEFAULT_SETTINGS = {
     "angles_radius_km": 1.0,
     "nearby_radius_km": 1.0,
     "nearby_ttl_minutes": 60,
+    "feed_ad_interval": 3,
+    "web_ad_network": "adfit",
+    "adfit_unit_id": "DAN-NOWFIELD01",
+    "adsense_client_id": "",
+    "adsense_slot_id": "",
 }
 
 
@@ -654,3 +659,31 @@ def add_comment(
     if not comment:
         raise HTTPException(status_code=404, detail="Video not found")
     return comment
+
+
+# --- Native Feed Ads & Web Ad Network / Creator Pool Revenue Endpoints (Spec v1.1 Section 11 & 13) ---
+
+@app.get("/ads/campaigns", response_model=List[schemas.AdCampaignResponse])
+def list_ad_campaigns(db: Session = Depends(get_db)):
+    return crud.get_active_ad_campaigns(db)
+
+
+@app.get("/ads/stats", response_model=schemas.AdRevenueStatsResponse)
+def get_ad_stats(db: Session = Depends(get_db)):
+    return crud.get_ad_revenue_stats(db, _load_settings())
+
+
+@app.post("/ads/event", response_model=schemas.AdEventResponse)
+def record_ad_event(
+    payload: schemas.AdEventCreate,
+    db: Session = Depends(get_db),
+):
+    """
+    Record an ad impression or click and accumulate 30% net revenue into the Creator Pool.
+    """
+    return crud.record_ad_revenue_event(
+        db=db,
+        ad_id=payload.ad_id,
+        event_type=payload.event_type,
+        viewer_id=payload.viewer_id,
+    )

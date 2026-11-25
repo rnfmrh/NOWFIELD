@@ -193,3 +193,43 @@ class UserFollow(Base):
     follower_id = Column(String(50), nullable=False, index=True)
     following_id = Column(String(50), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class AdCampaign(Base):
+    """
+    Spec v1.1 Section 11: Native Feed Ad Campaign & Web Ad Network (Kakao AdFit / Google AdSense)
+    30% of net ad revenue is accumulated into the Creator Pool.
+    """
+    __tablename__ = "ad_campaigns"
+
+    id = Column(String(50), primary_key=True, default=lambda: generate_uuid("ad_"))
+    network = Column(String(30), default="adfit", nullable=False)  # adfit, adsense, sponsor
+    ad_unit_id = Column(String(120), nullable=True)  # e.g. DAN-xxxxxx (Kakao AdFit) or ca-pub-xxx (AdSense)
+    sponsor_name = Column(String(100), nullable=False)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)
+    image_url = Column(String(500), nullable=False)
+    target_url = Column(String(500), nullable=False)
+    cta_label = Column(String(50), default="자세히 알아보기", nullable=False)
+    impression_revenue_krw = Column(Integer, default=50, nullable=False)
+    click_revenue_krw = Column(Integer, default=350, nullable=False)
+    impression_count = Column(Integer, default=0, nullable=False)
+    click_count = Column(Integer, default=0, nullable=False)
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class AdRevenueEvent(Base):
+    """
+    Spec v1.1 Section 11 & 13: Records ad impressions and clicks,
+    accumulating 30% net revenue into the Creator Pool.
+    """
+    __tablename__ = "ad_revenue_events"
+
+    id = Column(String(50), primary_key=True, default=lambda: generate_uuid("arev_"))
+    ad_id = Column(String(50), ForeignKey("ad_campaigns.id"), nullable=False, index=True)
+    event_type = Column(String(20), nullable=False, index=True)  # impression, click
+    viewer_id = Column(String(50), nullable=True, index=True)
+    gross_revenue_krw = Column(Integer, default=0, nullable=False)
+    creator_pool_krw = Column(Integer, default=0, nullable=False)  # 30% of gross_revenue_krw
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)

@@ -216,3 +216,54 @@ class SearchResponse(BaseModel):
     videos: List[VideoResponse] = []
     users: List[UserResponse] = []
     places: List[dict] = []
+
+
+# --- Ad Campaign & Creator Pool Revenue Schemas (Spec v1.1 Section 11 & 13) ---
+
+class AdCampaignResponse(BaseModel):
+    id: str
+    network: str = "adfit"  # adfit, adsense, sponsor
+    ad_unit_id: Optional[str] = None
+    sponsor_name: str
+    title: str
+    description: str
+    image_url: str
+    target_url: str
+    cta_label: str = "자세히 알아보기"
+    impression_revenue_krw: int = 50
+    click_revenue_krw: int = 350
+    impression_count: int = 0
+    click_count: int = 0
+    active: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdEventCreate(BaseModel):
+    ad_id: str
+    event_type: str = Field(..., description="impression or click")
+    viewer_id: Optional[str] = "u_seoul_walker"
+
+
+class AdEventResponse(BaseModel):
+    ad_id: str
+    event_type: str
+    added_gross_krw: int
+    added_creator_pool_krw: int
+    total_creator_pool_krw: int
+    total_impressions: int
+    total_clicks: int
+
+
+class AdRevenueStatsResponse(BaseModel):
+    base_pool_krw: int
+    live_accumulated_pool_krw: int
+    total_creator_pool_krw: int
+    total_gross_ad_revenue_krw: int
+    total_impressions: int
+    total_clicks: int
+    feed_ad_interval: int = 3
+    web_ad_network: str = "adfit"
+    adfit_unit_id: Optional[str] = None
+    adsense_client_id: Optional[str] = None
+    adsense_slot_id: Optional[str] = None

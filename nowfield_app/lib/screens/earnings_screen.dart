@@ -35,8 +35,13 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final data = await ApiService.getUserProfile(ApiService.currentUserId);
-    final acc = await ApiService.getSupportAccount(ApiService.currentUserId);
+    final results = await Future.wait([
+      ApiService.getUserProfile(ApiService.currentUserId),
+      ApiService.getSupportAccount(ApiService.currentUserId),
+      ApiService.getAdStats(),
+    ]);
+    final data = results[0] as Map<String, dynamic>;
+    final acc = results[1] as Map<String, dynamic>?;
     if (!mounted) return;
     setState(() {
       _profileData = data;
@@ -60,7 +65,6 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
-    const int adRev = 51240; // v1.1 Creator Pool (Ad Net Revenue 30% WQV share)
     final int totalSupportClicks = (_profileData?['total_support_clicks'] as int?) ?? 14;
 
     final rawVideos = (_profileData?['videos'] as List<dynamic>?) ?? [];
@@ -84,15 +88,23 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                _buildAdEarningsTab(adRev: adRev),
-                _buildCreatorSupportTab(
-                  videos: videos,
-                  totalSupportClicks: totalSupportClicks,
-                ),
-              ],
+          : ValueListenableBuilder<int>(
+              valueListenable: ApiService.creatorPoolRevenueNotifier,
+              builder: (_, liveAdRev, __) {
+                final int adRev = liveAdRev > 0
+                    ? liveAdRev
+                    : ((_profileData?['ad_creator_pool_revenue'] as num?)?.toInt() ?? 51240);
+                return TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildAdEarningsTab(adRev: adRev),
+                    _buildCreatorSupportTab(
+                      videos: videos,
+                      totalSupportClicks: totalSupportClicks,
+                    ),
+                  ],
+                );
+              },
             ),
     );
   }
@@ -157,6 +169,83 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
               ),
             ],
           ),
+        ),
+        const SizedBox(height: 16),
+
+        // Live Web Ad Network (Kakao AdFit / Google AdSense) & Real-time Pool Accumulation Card
+        ValueListenableBuilder<Map<String, dynamic>>(
+          valueListenable: ApiService.adStatsCacheNotifier,
+          builder: (_, stats, __) {
+            final int impressions = (stats['total_impressions'] as num?)?.toInt() ?? 0;
+            final int clicks = (stats['total_clicks'] as num?)?.toInt() ?? 0;
+            final int livePool = (stats['live_accumulated_pool_krw'] as num?)?.toInt() ?? 0;
+            final int interval = (stats['feed_ad_interval'] as num?)?.toInt() ?? 3;
+            final String network = (stats['web_ad_network']?.toString() ?? 'adfit').toUpperCase();
+
+            return Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.card,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.accent.withOpacity(0.35)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: const [
+                          Icon(Icons.ads_click_rounded, color: AppColors.accent, size: 19),
+                          SizedBox(width: 6),
+                          Text(
+                            '웹 광고 네트워크 실시간 풀 적립 현황',
+                            style: TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.22),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '$network · ${interval}개 영상마다 노출',
+                          style: const TextStyle(
+                            color: AppColors.accent,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatMiniBox('광고 노출수', '$impressions회'),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildStatMiniBox('광고 클릭수', '$clicks회'),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildStatMiniBox('실시간 30% 적립', '+₩${_formatCurrency(livePool)}'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
         ),
         const SizedBox(height: 16),
 
@@ -954,6 +1043,37 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
           style: TextStyle(color: badgeColor, fontSize: 16, fontWeight: FontWeight.bold),
         ),
       ],
+    );
+  }
+
+  Widget _buildStatMiniBox(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              color: AppColors.accent,
+              fontSize: 13.5,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10.5,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

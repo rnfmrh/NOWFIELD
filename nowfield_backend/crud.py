@@ -339,6 +339,7 @@ def get_user_profile_summary(
     support_resp = (
         schemas.SupportAccountResponse.model_validate(support_acc) if support_acc else None
     )
+    ad_stats = get_ad_revenue_stats(db)
 
     return schemas.UserProfileSummaryResponse(
         user=schemas.UserResponse.model_validate(user),
@@ -348,7 +349,7 @@ def get_user_profile_summary(
         is_following=is_following,
         support_account=support_resp,
         total_support_clicks=total_clicks,
-        ad_creator_pool_revenue=51240,
+        ad_creator_pool_revenue=ad_stats.total_creator_pool_krw,
         videos=video_responses,
     )
 
@@ -1238,6 +1239,154 @@ async def seed_initial_db(db: Session):
             db.commit()
         except Exception:
             db.rollback()
+
+    ensure_default_ad_campaigns(db)
+
+
+BASE_CREATOR_POOL_KRW = 51240
+
+
+def ensure_default_ad_campaigns(db: Session) -> List[models.AdCampaign]:
+    existing = db.query(models.AdCampaign).order_by(models.AdCampaign.created_at).all()
+    if existing:
+        return existing
+
+    defaults = [
+        models.AdCampaign(
+            id="ad_kakao_adfit_1",
+            network="adfit",
+            ad_unit_id="DAN-NOWFIELD01",
+            sponsor_name="Kakao AdFit · 로컬 현장 네트워크",
+            title="내 주변 실시간 핫플레이스 & 로컬 브랜드 캠페인",
+            description="카카오 애드핏 및 Google AdSense 웹 광고 네트워크 연동 슬롯입니다. 확정 광고 순수익의 30%가 크리에이터 풀에 실시간 적립됩니다.",
+            image_url="https://picsum.photos/seed/nowfield_adfit1/800/450",
+            target_url="https://adfit.kakao.com",
+            cta_label="캠페인 자세히 보기",
+            impression_revenue_krw=50,
+            click_revenue_krw=350,
+            active=True,
+        ),
+        models.AdCampaign(
+            id="ad_google_adsense_1",
+            network="adsense",
+            ad_unit_id="ca-pub-0000000000000000",
+            sponsor_name="Google AdSense · 글로벌 미디어 파트너",
+            title="글로벌 60초 원테이크 현장 네트워크 스폰서",
+            description="실시간 현장 기록자를 후원하는 글로벌 네이티브 광고 슬롯입니다. 노출 및 클릭 수익의 30%는 유효 조회 품질 지수 기준으로 배분됩니다.",
+            image_url="https://picsum.photos/seed/nowfield_adsense2/800/450",
+            target_url="https://www.google.com/adsense",
+            cta_label="스폰서 페이지 열기",
+            impression_revenue_krw=60,
+            click_revenue_krw=400,
+            active=True,
+        ),
+        models.AdCampaign(
+            id="ad_nowfield_partner_1",
+            network="adfit",
+            ad_unit_id="DAN-NOWFIELD02",
+            sponsor_name="나우필드 미디어 파트너",
+            title="서울 실시간 교통·날씨·인파 리포트 공식 스폰서",
+            description="일반 현장 영상과 명확히 구분되는 네이티브 피드 광고입니다. 시청자의 광고 노출 및 클릭 시 크리에이터 정산 풀이 즉시 증가합니다.",
+            image_url="https://picsum.photos/seed/nowfield_ad3/800/450",
+            target_url="https://ko-fi.com",
+            cta_label="자세히 알아보기",
+            impression_revenue_krw=50,
+            click_revenue_krw=300,
+            active=True,
+        ),
+    ]
+    for ad in defaults:
+        db.add(ad)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+    return db.query(models.AdCampaign).filter(models.AdCampaign.active == True).all()
+
+
+def get_active_ad_campaigns(db: Session) -> List[models.AdCampaign]:
+    ensure_default_ad_campaigns(db)
+    return (
+        db.query(models.AdCampaign)
+        .filter(models.AdCampaign.active == True)
+        .order_by(models.AdCampaign.created_at)
+        .all()
+    )
+
+
+def get_ad_revenue_stats(db: Session, settings: Optional[dict] = None) -> schemas.AdRevenueStatsResponse:
+    campaigns = ensure_default_ad_campaigns(db)
+    events = db.query(models.AdRevenueEvent).all()
+    live_pool = sum((e.creator_pool_krw or 0) for e in events)
+    gross_rev = sum((e.gross_revenue_krw or 0) for e in events)
+    total_impressions = sum((c.impression_count or 0) for c in campaigns)
+    total_clicks = sum((c.click_count or 0) for c in campaigns)
+
+    cfg = settings or {}
+    return schemas.AdRevenueStatsResponse(
+        base_pool_krw=BASE_CREATOR_POOL_KRW,
+        live_accumulated_pool_krw=live_pool,
+        total_creator_pool_krw=BASE_CREATOR_POOL_KRW + live_pool,
+        total_gross_ad_revenue_krw=gross_rev,
+        total_impressions=total_impressions,
+        total_clicks=total_clicks,
+        feed_ad_interval=int(cfg.get("feed_ad_interval", 3)),
+        web_ad_network=str(cfg.get("web_ad_network", "adfit")),
+        adfit_unit_id=cfg.get("adfit_unit_id", "DAN-NOWFIELD01"),
+        adsense_client_id=cfg.get("adsense_client_id", ""),
+        adsense_slot_id=cfg.get("adsense_slot_id", ""),
+    )
+
+
+def record_ad_revenue_event(
+    db: Session,
+    ad_id: str,
+    event_type: str,
+    viewer_id: Optional[str] = None,
+) -> schemas.AdEventResponse:
+    campaigns = ensure_default_ad_campaigns(db)
+    campaign = db.query(models.AdCampaign).filter(models.AdCampaign.id == ad_id).first()
+    if not campaign and campaigns:
+        campaign = campaigns[0]
+
+    norm_type = "click" if (event_type or "").lower() == "click" else "impression"
+    if campaign:
+        if norm_type == "click":
+            gross = campaign.click_revenue_krw or 350
+            campaign.click_count = (campaign.click_count or 0) + 1
+        else:
+            gross = campaign.impression_revenue_krw or 50
+            campaign.impression_count = (campaign.impression_count or 0) + 1
+        resolved_ad_id = campaign.id
+    else:
+        gross = 350 if norm_type == "click" else 50
+        resolved_ad_id = ad_id or "ad_kakao_adfit_1"
+
+    # Spec v1.1 Section 11: 30% of net ad revenue goes to the Creator Pool
+    creator_pool_share = max(1, int(round(gross * 0.30)))
+
+    ev = models.AdRevenueEvent(
+        id=f"arev_{uuid.uuid4().hex[:10]}",
+        ad_id=resolved_ad_id,
+        event_type=norm_type,
+        viewer_id=viewer_id,
+        gross_revenue_krw=gross,
+        creator_pool_krw=creator_pool_share,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(ev)
+    db.commit()
+
+    stats = get_ad_revenue_stats(db)
+    return schemas.AdEventResponse(
+        ad_id=resolved_ad_id,
+        event_type=norm_type,
+        added_gross_krw=gross,
+        added_creator_pool_krw=creator_pool_share,
+        total_creator_pool_krw=stats.total_creator_pool_krw,
+        total_impressions=stats.total_impressions,
+        total_clicks=stats.total_clicks,
+    )
 
 
 def get_video_angles(
