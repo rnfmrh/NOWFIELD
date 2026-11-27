@@ -186,10 +186,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           pinned: true,
                           delegate: _TabBarDelegate(
                             TabBar(
-                              indicatorColor: AppColors.accent,
+                              indicatorColor: AppColors.primary,
                               indicatorSize: TabBarIndicatorSize.tab,
-                              labelColor: AppColors.accent,
-                              unselectedLabelColor: Colors.white54,
+                              labelColor: AppColors.primary,
+                              unselectedLabelColor: AppColors.textMuted,
                               labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                               indicatorWeight: 2.5,
                               tabs: const [
@@ -451,12 +451,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               _buildStatItem(videoCount.toString(), '영상'),
-              Container(width: 1, height: 28, color: Colors.white12),
+              Container(width: 1, height: 28, color: AppColors.cardBorder),
               GestureDetector(
                 onTap: () => _showFollowListSheet(context, '팔로워'),
                 child: _buildStatItem(_followerCount.toString(), '팔로워'),
               ),
-              Container(width: 1, height: 28, color: Colors.white12),
+              Container(width: 1, height: 28, color: AppColors.cardBorder),
               GestureDetector(
                 onTap: () => _showFollowListSheet(context, '팔로잉'),
                 child: _buildStatItem(followingCount.toString(), '팔로잉'),
@@ -563,7 +563,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Colors.transparent, AppColors.background.withOpacity(0.85)],
+                    colors: [Colors.transparent, Colors.black.withOpacity(0.75)],
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                   ),

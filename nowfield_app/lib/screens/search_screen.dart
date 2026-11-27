@@ -177,7 +177,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 TabBar(
                   indicatorColor: AppColors.accent,
                   labelColor: AppColors.accent,
-                  unselectedLabelColor: Colors.white54,
+                  unselectedLabelColor: AppColors.textMuted,
                   labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   tabs: [
                     const Tab(text: '전체'),
@@ -248,7 +248,7 @@ class _SearchScreenState extends State<SearchScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.search_off_rounded, color: Colors.white30, size: 54),
+            const Icon(Icons.search_off_rounded, color: AppColors.textMuted, size: 54),
             const SizedBox(height: 12),
             Text(
               '"$query"에 대한 검색 결과가 없습니다.',

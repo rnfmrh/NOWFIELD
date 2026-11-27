@@ -248,7 +248,12 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           IconButton(
             tooltip: '새로고침',
-            icon: const Icon(Icons.refresh, color: AppColors.textPrimary, size: 22),
+            icon: const Icon(
+              Icons.refresh,
+              color: Colors.white,
+              size: 22,
+              shadows: [Shadow(color: Colors.black87, blurRadius: 4)],
+            ),
             onPressed: () {
               setState(() => _isLoading = true);
               _loadFeed();
@@ -256,7 +261,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             tooltip: '검색',
-            icon: const Icon(Icons.search, color: AppColors.textPrimary, size: 24),
+            icon: const Icon(
+              Icons.search,
+              color: Colors.white,
+              size: 24,
+              shadows: [Shadow(color: Colors.black87, blurRadius: 4)],
+            ),
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
@@ -507,17 +517,28 @@ class _NativeFeedAdItemState extends State<NativeFeedAdItem> {
     final adStats = ApiService.adStatsCacheNotifier.value;
 
     return Container(
-      color: AppColors.background,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF1F2937), Color(0xFFF5F6F8)],
+          stops: [0.0, 0.25],
+        ),
+      ),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 72),
       child: Center(
         child: Container(
           padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
-            color: AppColors.card,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppColors.accent.withOpacity(0.35), width: 1.2),
-            boxShadow: const [
-              BoxShadow(color: Colors.black45, blurRadius: 16, offset: Offset(0, 6)),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.cardBorder, width: 1.0),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
             ],
           ),
           child: Column(
@@ -1479,15 +1500,15 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
               ),
             ),
 
-          // Gradient overlay for better contrast and text readability
+          // Gradient overlay for better contrast and text readability on video
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  AppColors.background.withOpacity(0.6),
+                  Colors.black.withOpacity(0.55),
                   Colors.transparent,
-                  AppColors.background.withOpacity(0.4),
-                  AppColors.background.withOpacity(0.92),
+                  Colors.black.withOpacity(0.30),
+                  Colors.black.withOpacity(0.85),
                 ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
@@ -1506,7 +1527,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                     top: 6,
                     left: 8,
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppColors.textPrimary, size: 22),
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 22),
                       onPressed: () => Navigator.of(context).pop(),
                     ),
                   ),
@@ -1521,7 +1542,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                     style: const TextStyle(
                       fontSize: 19,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
+                      color: Colors.white,
                       shadows: [
                         Shadow(color: Colors.black87, blurRadius: 6, offset: Offset(0, 1)),
                       ],
@@ -1548,14 +1569,14 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                               color: AppColors.subtitleBackground,
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
-                                color: AppColors.accent.withOpacity(0.25),
+                                color: Colors.white24,
                                 width: 0.6,
                               ),
                             ),
                             child: Text(
                               displaySubtitle,
                               style: const TextStyle(
-                                color: AppColors.textPrimary,
+                                color: Colors.white,
                                 fontSize: 15,
                                 height: 1.3,
                                 fontWeight: FontWeight.w400,
@@ -1585,7 +1606,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                                 Container(
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    border: Border.all(color: AppColors.accent, width: 1.2),
+                                    border: Border.all(color: Colors.white, width: 1.2),
                                   ),
                                   child: ClipOval(
                                     child: Image.network(
@@ -1596,8 +1617,8 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                                       errorBuilder: (context, error, stackTrace) => Container(
                                         width: 34,
                                         height: 34,
-                                        color: AppColors.card,
-                                        child: const Icon(Icons.person, color: AppColors.accent, size: 20),
+                                        color: Colors.black45,
+                                        child: const Icon(Icons.person, color: Colors.white, size: 20),
                                       ),
                                     ),
                                   ),
@@ -1608,7 +1629,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                                   style: const TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.bold,
-                                    color: AppColors.textPrimary,
+                                    color: Colors.white,
                                   ),
                                 ),
                               ],
@@ -1620,7 +1641,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                               decoration: BoxDecoration(
-                                color: AppColors.primary.withOpacity(0.85),
+                                color: AppColors.primary.withOpacity(0.92),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: const Text(
@@ -1642,18 +1663,18 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                               decoration: BoxDecoration(
                                 color: AppColors.subtitleBackground,
                                 borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: AppColors.accent.withOpacity(0.45), width: 0.7),
+                                border: Border.all(color: Colors.white38, width: 0.7),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.closed_caption_rounded, size: 12, color: AppColors.accent),
+                                  const Icon(Icons.closed_caption_rounded, size: 12, color: Colors.white),
                                   const SizedBox(width: 3),
                                   Text(
                                     '자막 · $_captionLang',
                                     style: const TextStyle(
                                       fontSize: 10,
-                                      color: AppColors.accent,
+                                      color: Colors.white,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
@@ -1675,14 +1696,14 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                               Icon(
                                 isHiddenLocation ? Icons.location_off_outlined : Icons.location_on,
                                 size: 14,
-                                color: isHiddenLocation ? AppColors.textMuted : AppColors.accent,
+                                color: isHiddenLocation ? Colors.white60 : const Color(0xFF93C5FD),
                               ),
                               const SizedBox(width: 4),
                               Text(
                                 isHiddenLocation
                                     ? '위치 미표시'
                                     : locationName,
-                                style: const TextStyle(fontSize: 12.5, color: AppColors.textMuted),
+                                style: const TextStyle(fontSize: 12.5, color: Colors.white70),
                               ),
                             ],
                           ),
@@ -1709,20 +1730,20 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: AppColors.card.withOpacity(0.9),
+                                  color: Colors.black54,
                                   borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: AppColors.accent.withOpacity(0.45), width: 0.8),
+                                  border: Border.all(color: Colors.white38, width: 0.8),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.switch_video_outlined, size: 12, color: AppColors.accent),
+                                    const Icon(Icons.switch_video_outlined, size: 12, color: Colors.white),
                                     const SizedBox(width: 4),
                                     Text(
                                       '이 장소의 다른 시선 $_otherAnglesCount개',
                                       style: const TextStyle(
                                         fontSize: 10.5,
-                                        color: AppColors.accent,
+                                        color: Colors.white,
                                         fontWeight: FontWeight.w700,
                                       ),
                                     ),
@@ -1745,7 +1766,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                     children: [
                       _buildActionIcon(
                         icon: _isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                        iconColor: _isLiked ? Colors.redAccent : AppColors.textPrimary,
+                        iconColor: _isLiked ? Colors.redAccent : Colors.white,
                         label: _likeCount.toString(),
                         onTap: _handleToggleLike,
                       ),
@@ -1766,7 +1787,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                         const SizedBox(height: 12),
                         _buildActionIcon(
                           icon: Icons.volunteer_activism_rounded,
-                          iconColor: AppColors.accent,
+                          iconColor: const Color(0xFF93C5FD),
                           label: '후원하기',
                           onTap: () => _showCreatorSupportSheet(
                             context,
@@ -1779,7 +1800,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
                       ],
                       const SizedBox(height: 12),
                       IconButton(
-                        icon: const Icon(Icons.more_horiz, color: AppColors.textPrimary, size: 28),
+                        icon: const Icon(Icons.more_horiz, color: Colors.white, size: 28),
                         onPressed: () => _showMoreBottomSheet(context),
                       ),
                     ],
@@ -1797,7 +1818,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
     required IconData icon,
     required String label,
     required VoidCallback onTap,
-    Color iconColor = AppColors.textPrimary,
+    Color iconColor = Colors.white,
     bool flipIcon = false,
   }) {
     Widget iconWidget = Icon(
@@ -1829,7 +1850,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
             Text(
               label,
               style: const TextStyle(
-                color: AppColors.textPrimary,
+                color: Colors.white,
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 shadows: [

@@ -123,12 +123,18 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
           padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
-              colors: [Color(0xFF1D4ED8), Color(0xFF183459)],
+              colors: [Color(0xFF3B66F5), Color(0xFF254EDB)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.accent.withOpacity(0.4)),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primary.withOpacity(0.22),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -141,14 +147,14 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
                     style: TextStyle(color: Colors.white70, fontSize: 13),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.black26,
-                      borderRadius: BorderRadius.circular(10),
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       ApiService.currentUsername,
-                      style: const TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.bold),
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
@@ -165,7 +171,7 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
               const SizedBox(height: 6),
               const Text(
                 '크리에이터 풀 배분',
-                style: TextStyle(color: AppColors.accent, fontSize: 12.5, fontWeight: FontWeight.w600),
+                style: TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.w600),
               ),
             ],
           ),

@@ -19,24 +19,27 @@ class NowfieldApp extends StatelessWidget {
       title: 'NOWFIELD',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        brightness: Brightness.dark,
+        brightness: Brightness.light,
         scaffoldBackgroundColor: AppColors.background,
-        colorScheme: const ColorScheme.dark(
+        colorScheme: const ColorScheme.light(
           primary: AppColors.primary,
           secondary: AppColors.accent,
-          surface: AppColors.card,
+          surface: AppColors.background,
+          onSurface: AppColors.textPrimary,
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: AppColors.background,
+          surfaceTintColor: Colors.transparent,
           elevation: 0,
           centerTitle: true,
           titleTextStyle: TextStyle(
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w700,
             color: AppColors.textPrimary,
             fontSize: 18,
           ),
           iconTheme: IconThemeData(color: AppColors.textPrimary),
         ),
+        dividerColor: AppColors.cardBorder,
         useMaterial3: true,
       ),
       home: const MainScreen(),
@@ -74,48 +77,49 @@ class _MainScreenState extends State<MainScreen> {
       backgroundColor: AppColors.background,
       body: _widgetOptions.elementAt(_selectedIndex),
       bottomNavigationBar: Container(
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           color: AppColors.background,
           border: Border(
             top: BorderSide(
-              color: AppColors.cardBorder.withOpacity(0.35),
-              width: 0.8,
+              color: AppColors.cardBorder,
+              width: 1.0,
             ),
           ),
         ),
         child: BottomNavigationBar(
           type: BottomNavigationBarType.fixed,
           backgroundColor: AppColors.background,
+          elevation: 0,
           items: const <BottomNavigationBarItem>[
             BottomNavigationBarItem(
               icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
+              activeIcon: Icon(Icons.home_rounded),
               label: '홈',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.location_on_outlined),
-              activeIcon: Icon(Icons.location_on),
+              activeIcon: Icon(Icons.location_on_rounded),
               label: '내 주변',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.add_box_outlined, size: 30),
-              activeIcon: Icon(Icons.add_box, size: 30),
+              activeIcon: Icon(Icons.add_box_rounded, size: 30),
               label: '촬영',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.notifications_outlined),
-              activeIcon: Icon(Icons.notifications),
+              activeIcon: Icon(Icons.notifications_rounded),
               label: '알림',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
+              icon: Icon(Icons.person_outline_rounded),
+              activeIcon: Icon(Icons.person_rounded),
               label: '프로필',
             ),
           ],
           currentIndex: _selectedIndex,
-          selectedItemColor: AppColors.accent,
-          unselectedItemColor: Colors.white54,
+          selectedItemColor: AppColors.primary,
+          unselectedItemColor: AppColors.textMuted,
           showSelectedLabels: true,
           showUnselectedLabels: true,
           selectedFontSize: 11,

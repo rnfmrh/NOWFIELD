@@ -156,7 +156,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                       width: 40,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Colors.white24,
+                        color: AppColors.cardBorder,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -222,7 +222,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                       style: const TextStyle(color: AppColors.textPrimary, fontSize: 13.5),
                       decoration: InputDecoration(
                         hintText: '(선택) 현장 상황 및 재검토 요청 사유를 입력해주세요',
-                        hintStyle: const TextStyle(color: Colors.white30, fontSize: 12.5),
+                        hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12.5),
                         filled: true,
                         fillColor: AppColors.background,
                         border: OutlineInputBorder(
@@ -406,7 +406,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                                 style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                               ),
                             ),
-                            trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white38, size: 20),
+                            trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted, size: 20),
                             onTap: () => _handleAlertTap(alert),
                           );
                         },

@@ -347,9 +347,10 @@ class _CameraScreenState extends State<CameraScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.card,
+      useSafeArea: true,
+      backgroundColor: AppColors.background,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (ctx) {
         return StatefulBuilder(
@@ -589,11 +590,247 @@ class _CameraScreenState extends State<CameraScreen> {
 
             final currentLength = titleController.text.characters.length;
 
+            String formatLocationModeShort(String mode) {
+              if (mode == 'approximate') return '대략적인 위치';
+              if (mode == 'hidden') return '위치 비공개';
+              return '정확한 위치';
+            }
+
+            Future<void> openLocationModePicker() async {
+              String tempMode = locationDisplayMode;
+              final picked = await showModalBottomSheet<String>(
+                context: ctx,
+                backgroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                builder: (sheetCtx) {
+                  return StatefulBuilder(
+                    builder: (sheetContext, setSheetState) {
+                      Widget buildOptionTile({
+                        required String modeKey,
+                        required IconData icon,
+                        required String title,
+                        required String subtitle,
+                      }) {
+                        final bool isSelected = tempMode == modeKey;
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(14),
+                          onTap: () => setSheetState(() => tempMode = modeKey),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? AppColors.primary.withOpacity(0.12)
+                                        : AppColors.card,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    icon,
+                                    color: isSelected ? AppColors.primary : AppColors.textPrimary,
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        title,
+                                        style: const TextStyle(
+                                          color: AppColors.textPrimary,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        subtitle,
+                                        style: const TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 12.5,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  isSelected
+                                      ? Icons.radio_button_checked_rounded
+                                      : Icons.radio_button_off_rounded,
+                                  color: isSelected ? AppColors.primary : const Color(0xFFD1D6DB),
+                                  size: 24,
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+
+                      return SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: const [
+                                  Icon(
+                                    Icons.location_on_outlined,
+                                    color: AppColors.textPrimary,
+                                    size: 24,
+                                  ),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    '위치 공개 방식',
+                                    style: TextStyle(
+                                      color: AppColors.textPrimary,
+                                      fontSize: 19,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '현황에서 본 또는 제목적인 위치를 선택할 수 있어요 · $resolvedDongName',
+                                style: const TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+                              buildOptionTile(
+                                modeKey: 'exact',
+                                icon: Icons.location_on_rounded,
+                                title: '정확한 위치',
+                                subtitle: '촬영한 장소가 지도에 표시됩니다',
+                              ),
+                              buildOptionTile(
+                                modeKey: 'approximate',
+                                icon: Icons.radar_rounded,
+                                title: '대략적인 위치',
+                                subtitle: '약 100~200m 범위로 표시됩니다',
+                              ),
+                              buildOptionTile(
+                                modeKey: 'hidden',
+                                icon: Icons.location_off_outlined,
+                                title: '위치 비공개',
+                                subtitle: '지도에 위치가 표시되지 않습니다',
+                              ),
+                              const SizedBox(height: 18),
+                              SizedBox(
+                                width: double.infinity,
+                                height: 52,
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.card,
+                                    foregroundColor: AppColors.textPrimary,
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(26),
+                                    ),
+                                  ),
+                                  onPressed: () => Navigator.pop(sheetCtx, tempMode),
+                                  child: const Text(
+                                    '확인',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              );
+
+              if (picked != null && ctx.mounted) {
+                if (picked == 'exact' && !precisePermissionGranted) {
+                  setModalState(() => locationDisplayMode = 'approximate');
+                  ScaffoldMessenger.of(this.context).showSnackBar(
+                    const SnackBar(content: Text('OS 정밀 위치 권한이 꺼져 있어 대략적인 위치로 설정됩니다.')),
+                  );
+                  return;
+                }
+                if (picked == 'exact' && !exactLocationConsented) {
+                  final agreed = await promptExactLocationConsentDialog();
+                  if (!ctx.mounted) return;
+                  if (agreed) {
+                    exactLocationConsented = true;
+                    await ApiService.recordExactLocationConsent(true);
+                    setModalState(() => locationDisplayMode = 'exact');
+                  } else {
+                    setModalState(() => locationDisplayMode = 'approximate');
+                  }
+                  return;
+                }
+                setModalState(() => locationDisplayMode = picked);
+              }
+            }
+
+            void showCaptureInfoDialog() {
+              showDialog(
+                context: ctx,
+                builder: (dCtx) => AlertDialog(
+                  backgroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  title: Row(
+                    children: const [
+                      Icon(Icons.verified_rounded, color: AppColors.primary, size: 22),
+                      SizedBox(width: 8),
+                      Text(
+                        '원본 촬영 및 게시 안내',
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  content: Text(
+                    '• 촬영 위치: $resolvedDongName\n'
+                    '• 촬영 길이: ${_formatDuration(durationSec)}\n'
+                    '• 촬영 시각: ${ApiService.formatPublishedDateTime((_captureStartTime ?? DateTime.now()).toUtc().toIso8601String())}\n'
+                    '• 자막: 현장 음성에서 원문 및 다국어 자막 자동 생성\n'
+                    '• 세션: $_captureSessionId',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13,
+                      height: 1.55,
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dCtx),
+                      child: const Text(
+                        '확인',
+                        style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
             return Padding(
               padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 16,
+                left: 24,
+                right: 24,
+                top: 12,
                 bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
               ),
               child: SingleChildScrollView(
@@ -601,71 +838,121 @@ class _CameraScreenState extends State<CameraScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Drag Handle
-                    Center(
-                      child: Container(
-                        width: 44,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.white24,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Header with Duration & Original Capture Badge
+                    // Top Bar: [<] Back and [ⓘ] Info button matching the new concept
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: const [
-                            Icon(Icons.verified_rounded, color: AppColors.accent, size: 22),
-                            SizedBox(width: 8),
-                            Text(
-                              '현장 영상 게시',
-                              style: TextStyle(
-                                color: AppColors.textPrimary,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(
+                            Icons.arrow_back_ios_new_rounded,
+                            color: AppColors.textPrimary,
+                            size: 20,
+                          ),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          tooltip: '촬영 정보',
+                          icon: const Icon(
+                            Icons.info_outline_rounded,
+                            color: AppColors.textPrimary,
+                            size: 22,
+                          ),
+                          onPressed: showCaptureInfoDialog,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Center Rounded Video Preview Thumbnail Card with Play Button & Duration Badge
+                    Center(
+                      child: Container(
+                        width: 220,
+                        height: 220,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(24),
+                          color: AppColors.card,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.08),
+                              blurRadius: 16,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                          image: const DecorationImage(
+                            image: NetworkImage('https://picsum.photos/seed/nowfield_namsan/600/600'),
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        child: Stack(
+                          children: [
+                            // Subtle dark gradient at bottom for duration legibility
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(24),
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.transparent,
+                                      Colors.black.withOpacity(0.35),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // Center Play Icon Button
+                            Center(
+                              child: Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.45),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.play_arrow_rounded,
+                                  color: Colors.white,
+                                  size: 32,
+                                ),
+                              ),
+                            ),
+                            // Bottom Right Duration Pill (e.g. 0:45)
+                            Positioned(
+                              right: 12,
+                              bottom: 10,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.6),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '0:${durationSec.clamp(1, 60).toString().padLeft(2, '0')}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.primary, width: 0.8),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.videocam_rounded, color: AppColors.accent, size: 14),
-                              const SizedBox(width: 4),
-                              Text(
-                                '원본 촬영 · ${durationSec}초',
-                                style: const TextStyle(
-                                  color: AppColors.accent,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 22),
 
                     // Spec #36: Publishing step-by-step progress view
                     if (isUploading) ...[
                       Container(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(18),
                         decoration: BoxDecoration(
-                          color: AppColors.background,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.primary.withOpacity(0.5)),
+                          color: AppColors.card,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: AppColors.primary.withOpacity(0.3)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -684,7 +971,7 @@ class _CameraScreenState extends State<CameraScreen> {
                                 Text(
                                   '${(uploadProgress * 100).toInt()}%',
                                   style: const TextStyle(
-                                    color: AppColors.accent,
+                                    color: AppColors.primary,
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -697,7 +984,7 @@ class _CameraScreenState extends State<CameraScreen> {
                               child: LinearProgressIndicator(
                                 value: uploadProgress,
                                 minHeight: 8,
-                                backgroundColor: Colors.white12,
+                                backgroundColor: AppColors.cardBorder,
                                 valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
                               ),
                             ),
@@ -716,15 +1003,24 @@ class _CameraScreenState extends State<CameraScreen> {
                                       const SizedBox(
                                         width: 16,
                                         height: 16,
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent),
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: AppColors.primary,
+                                        ),
                                       )
                                     else
-                                      const Icon(Icons.radio_button_unchecked, color: Colors.white24, size: 16),
+                                      const Icon(
+                                        Icons.radio_button_unchecked,
+                                        color: AppColors.textMuted,
+                                        size: 16,
+                                      ),
                                     const SizedBox(width: 10),
                                     Text(
                                       stepLabels[idx],
                                       style: TextStyle(
-                                        color: isDone || isCurrent ? AppColors.textPrimary : AppColors.textMuted,
+                                        color: isDone || isCurrent
+                                            ? AppColors.textPrimary
+                                            : AppColors.textMuted,
                                         fontSize: 13,
                                         fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
                                       ),
@@ -736,486 +1032,266 @@ class _CameraScreenState extends State<CameraScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 18),
                     ] else ...[
-                      // Spec #35: Add a title
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: const [
-                              Text(
-                                '영상 제목 입력',
-                                style: TextStyle(
-                                  color: AppColors.textPrimary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              SizedBox(height: 2),
-                              Text(
-                                '지금 목격하고 있는 현장 상황을 적어주세요',
-                                style: TextStyle(color: AppColors.textMuted, fontSize: 11),
-                              ),
-                            ],
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: AppColors.background,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: currentLength >= 100 ? AppColors.danger : AppColors.cardBorder,
-                              ),
-                            ),
-                            child: Text(
-                              '$currentLength / 100',
-                              style: TextStyle(
-                                color: currentLength >= 100 ? AppColors.danger : AppColors.accent,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
+                      // Prompt Heading: "지금, 무슨 일이 있나요?"
+                      const Text(
+                        '지금, 무슨 일이 있나요?',
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
+                        ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '현장에서 본 소식을 제목으로 알려주세요',
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Clean Soft-Gray Rounded Title Input Field
                       TextField(
                         controller: titleController,
                         maxLength: 100,
-                        maxLines: 2,
+                        maxLines: 1,
                         onChanged: (_) => setModalState(() {}),
-                        style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w500,
+                        ),
                         decoration: InputDecoration(
                           counterText: '',
-                          hintText: '예: 서울역 대합실 현재 인파가 많아 혼잡합니다',
-                          hintStyle: const TextStyle(color: Colors.white30),
+                          hintText: '서울 남산, 오늘 날씨 정말 좋아요!',
+                          hintStyle: const TextStyle(color: AppColors.textMuted),
                           filled: true,
-                          fillColor: AppColors.background,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          fillColor: AppColors.card,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(color: AppColors.cardBorder),
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
                           ),
                           enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(color: AppColors.cardBorder),
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
                           ),
                           focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(14),
                             borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 16),
-
-                      // CR-02: Location Precision & Default Value (Exact default, Approximate 100~200m, Hidden)
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppColors.background,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: locationDisplayMode == 'exact'
-                                ? AppColors.warning.withOpacity(0.55)
-                                : AppColors.cardBorder,
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          '$currentLength / 100',
+                          style: TextStyle(
+                            color: currentLength >= 100 ? AppColors.danger : AppColors.textMuted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: const [
-                                    Icon(Icons.my_location_rounded, color: AppColors.accent, size: 18),
-                                    SizedBox(width: 6),
-                                    Text(
-                                      '위치 공개 정밀도 설정',
-                                      style: TextStyle(
-                                        color: AppColors.textPrimary,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primary.withOpacity(0.22),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    ApiService.formatLocationPrivacyLabel(locationDisplayMode),
-                                    style: const TextStyle(
-                                      color: AppColors.accent,
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: _buildRadioOption(
-                                    label: '정확한 위치',
-                                    selected: locationDisplayMode == 'exact',
-                                    onTap: () {
-                                      if (!precisePermissionGranted) {
-                                        setModalState(() {
-                                          locationDisplayMode = 'approximate';
-                                        });
-                                        ScaffoldMessenger.of(this.context).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('OS 정밀 위치 권한이 꺼져 있어 약 100~200m 범위로 설정됩니다.'),
-                                          ),
-                                        );
-                                        return;
-                                      }
-                                      if (isSensitivePlace) {
-                                        setModalState(() {
-                                          locationDisplayMode = 'approximate';
-                                        });
-                                        ScaffoldMessenger.of(this.context).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('민감 장소 보호를 위해 약 100~200m 범위 또는 위치 미표시만 허용됩니다.'),
-                                          ),
-                                        );
-                                        return;
-                                      }
-                                      setModalState(() => locationDisplayMode = 'exact');
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: _buildRadioOption(
-                                    label: '약 100~200m',
-                                    selected: locationDisplayMode == 'approximate',
-                                    onTap: () => setModalState(() => locationDisplayMode = 'approximate'),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: _buildRadioOption(
-                                    label: '위치 미표시',
-                                    selected: locationDisplayMode == 'hidden',
-                                    onTap: () => setModalState(() => locationDisplayMode = 'hidden'),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
+                      ),
+                      const SizedBox(height: 8),
+                      const Divider(color: AppColors.cardBorder, height: 1),
 
-                            // Pre-publish Map Pin Preview Card (CR-02.A & CR-02.B)
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: AppColors.card,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: AppColors.cardBorder),
+                      // Row 1: Location Disclosure ("📍 위치 공개    정확한 위치 >")
+                      InkWell(
+                        onTap: openLocationModePicker,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.location_on_outlined,
+                                color: AppColors.textPrimary,
+                                size: 22,
                               ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 44,
-                                    height: 44,
-                                    decoration: BoxDecoration(
-                                      color: AppColors.background,
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: locationDisplayMode == 'hidden'
-                                            ? Colors.white24
-                                            : (locationDisplayMode == 'exact'
-                                                ? AppColors.warning
-                                                : AppColors.accent),
-                                      ),
-                                    ),
-                                    child: Center(
-                                      child: Icon(
-                                        locationDisplayMode == 'hidden'
-                                            ? Icons.location_off_outlined
-                                            : (locationDisplayMode == 'exact'
-                                                ? Icons.place_rounded
-                                                : Icons.radar_rounded),
-                                        color: locationDisplayMode == 'hidden'
-                                            ? AppColors.textMuted
-                                            : (locationDisplayMode == 'exact'
-                                                ? AppColors.warning
-                                                : AppColors.accent),
-                                        size: 24,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          locationDisplayMode == 'exact'
-                                              ? '지도 핀 미리보기: $resolvedDongName'
-                                              : (locationDisplayMode == 'approximate'
-                                                  ? '지도 핀 미리보기: $resolvedDongName · 약 100~200m 일반화 핀'
-                                                  : '지도 핀 미생성 · 피드 및 프로필에 위치 미표시'),
-                                          style: const TextStyle(
-                                            color: AppColors.textPrimary,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          locationDisplayMode == 'exact'
-                                              ? '⚠️ 이 위치가 모든 시청자에게 공개됩니다'
-                                              : (locationDisplayMode == 'approximate'
-                                                  ? '촬영 지점에서 100~200m 범위의 고정 일반화 좌표만 공개되며 원본 좌표는 비공개 보관됩니다.'
-                                                  : '공개 API 응답에서 위치 좌표가 제외되며 Nearby 지도 핀에 나타나지 않습니다.'),
-                                          style: TextStyle(
-                                            color: locationDisplayMode == 'exact'
-                                                ? AppColors.warning
-                                                : AppColors.textMuted,
-                                            fontSize: 11,
-                                            height: 1.35,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-
-                            // CR-02.B: Explicit Consent Checkbox & Sensitive Place Guard
-                            if (locationDisplayMode == 'exact') ...[
-                              const SizedBox(height: 8),
-                              GestureDetector(
-                                onTap: () async {
-                                  final nextVal = !exactLocationConsented;
-                                  setModalState(() => exactLocationConsented = nextVal);
-                                  await ApiService.recordExactLocationConsent(nextVal);
-                                },
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      exactLocationConsented
-                                          ? Icons.check_box_rounded
-                                          : Icons.check_box_outline_blank_rounded,
-                                      color: exactLocationConsented ? AppColors.accent : AppColors.warning,
-                                      size: 18,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    const Expanded(
-                                      child: Text(
-                                        '[필수 사전 동의] 정확한 촬영 위치가 모든 시청자에게 공개됨을 확인하고 동의합니다.',
-                                        style: TextStyle(color: AppColors.textPrimary, fontSize: 11.5),
-                                      ),
-                                    ),
-                                  ],
+                              const SizedBox(width: 10),
+                              const Text(
+                                '위치 공개',
+                                style: TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
                                 ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                formatLocationModeShort(locationDisplayMode),
+                                style: const TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                color: AppColors.textMuted,
+                                size: 20,
                               ),
                             ],
-                            const SizedBox(height: 6),
+                          ),
+                        ),
+                      ),
+                      const Divider(color: AppColors.cardBorder, height: 1),
+
+                      // Row 2: Support Feature Toggle ("♡ 후원 기능 사용 ⓘ    [Switch]")
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.favorite_border_rounded,
+                              color: AppColors.textPrimary,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 10),
+                            const Text(
+                              '후원 기능 사용',
+                              style: TextStyle(
+                                color: AppColors.textPrimary,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
                             GestureDetector(
                               onTap: () {
-                                setModalState(() {
-                                  isSensitivePlace = !isSensitivePlace;
-                                  if (isSensitivePlace && locationDisplayMode == 'exact') {
-                                    locationDisplayMode = 'approximate';
-                                  }
-                                });
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('시청자가 외부 후원 페이지를 통해 수수료 0%로 직접 후원할 수 있습니다.'),
+                                  ),
+                                );
                               },
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    isSensitivePlace
-                                        ? Icons.check_box_rounded
-                                        : Icons.check_box_outline_blank_rounded,
-                                    color: isSensitivePlace ? AppColors.warning : AppColors.textMuted,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  const Expanded(
-                                    child: Text(
-                                      '집·거주지·학교·병원 등 민감 장소에서 촬영됨',
-                                      style: TextStyle(color: AppColors.textMuted, fontSize: 11),
-                                    ),
-                                  ),
-                                ],
+                              child: const Icon(
+                                Icons.info_outline_rounded,
+                                color: AppColors.textMuted,
+                                size: 17,
                               ),
+                            ),
+                            const Spacer(),
+                            Switch.adaptive(
+                              value: canEnableSupport && supportEnabled,
+                              activeColor: Colors.white,
+                              activeTrackColor: AppColors.primary,
+                              inactiveThumbColor: Colors.white,
+                              inactiveTrackColor: const Color(0xFFD1D6DB),
+                              onChanged: (val) async {
+                                if (val && !canEnableSupport) {
+                                  await Navigator.of(this.context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => const EarningsScreen(initialTabIndex: 1),
+                                    ),
+                                  );
+                                  final updatedAcc =
+                                      await ApiService.getSupportAccount(ApiService.currentUserId);
+                                  if (ctx.mounted) {
+                                    setModalState(() {
+                                      linkedSupportAccount = updatedAcc;
+                                      if (updatedAcc != null &&
+                                          updatedAcc['active'] == true &&
+                                          updatedAcc['ownership_status'] == 'verified') {
+                                        supportEnabled = true;
+                                      }
+                                    });
+                                  }
+                                  return;
+                                }
+                                setModalState(() => supportEnabled = val);
+                              },
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 12),
 
-                      // CR-01: Per-video Creator Support Toggle (Replaces License Sales)
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppColors.background,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.cardBorder),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      // Expandable Support Info Banner (Screen 3 of the concept image)
+                      if (canEnableSupport && supportEnabled) ...[
+                        const SizedBox(height: 4),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () {
+                            Navigator.of(this.context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const EarningsScreen(initialTabIndex: 1),
+                              ),
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF3F6FE),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Row(
                               children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Icon(
+                                    Icons.volunteer_activism_rounded,
+                                    color: AppColors.primary,
+                                    size: 22,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                const Expanded(
+                                  child: Text(
+                                    '시청자들이 크리에이터를\n후원할 수 있어요!',
+                                    style: TextStyle(
+                                      color: AppColors.textPrimary,
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ),
                                 Row(
                                   children: const [
-                                    Icon(Icons.volunteer_activism_rounded, color: AppColors.accent, size: 18),
-                                    SizedBox(width: 6),
                                     Text(
-                                      '후원 버튼 표시',
+                                      '자세히 보기',
                                       style: TextStyle(
-                                        color: AppColors.textPrimary,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.primary,
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
-                                  ],
-                                ),
-                                Row(
-                                  children: [
-                                    _buildRadioOption(
-                                      label: '꺼짐',
-                                      selected: !supportEnabled,
-                                      onTap: () => setModalState(() => supportEnabled = false),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    _buildRadioOption(
-                                      label: '켜짐',
-                                      selected: canEnableSupport && supportEnabled,
-                                      onTap: () {
-                                        if (!canEnableSupport) {
-                                          ScaffoldMessenger.of(this.context).showSnackBar(
-                                            const SnackBar(
-                                              content: Text('유효한 외부 후원 URL이 연결 및 검증된 경우에만 켤 수 있습니다.'),
-                                            ),
-                                          );
-                                          return;
-                                        }
-                                        setModalState(() => supportEnabled = true);
-                                      },
+                                    SizedBox(width: 2),
+                                    Icon(
+                                      Icons.chevron_right_rounded,
+                                      color: AppColors.primary,
+                                      size: 16,
                                     ),
                                   ],
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 8),
-                            if (canEnableSupport) ...[
-                              Text(
-                                supportEnabled
-                                    ? '시청자에게 [후원하기] 버튼이 노출되며 탭 시 ${linkedSupportAccount!['support_url']} 로 연결됩니다.'
-                                    : '연결된 후원 페이지가 있습니다. 이 영상에서 후원 버튼을 노출하려면 [켜짐]을 선택하세요.',
-                                style: TextStyle(
-                                  color: supportEnabled ? AppColors.accent : AppColors.textMuted,
-                                  fontSize: 11.5,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ] else ...[
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Expanded(
-                                    child: Text(
-                                      '연결된 외부 후원 계정이 없습니다.',
-                                      style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
-                                    ),
-                                  ),
-                                  TextButton.icon(
-                                    onPressed: () async {
-                                      await Navigator.of(this.context).push(
-                                        MaterialPageRoute(
-                                          builder: (_) => const EarningsScreen(initialTabIndex: 1),
-                                        ),
-                                      );
-                                      final updatedAcc =
-                                          await ApiService.getSupportAccount(ApiService.currentUserId);
-                                      if (ctx.mounted) {
-                                        setModalState(() {
-                                          linkedSupportAccount = updatedAcc;
-                                        });
-                                      }
-                                    },
-                                    icon: const Icon(Icons.link_rounded, color: AppColors.accent, size: 15),
-                                    label: const Text(
-                                      '후원 페이지 연결',
-                                      style: TextStyle(
-                                        color: AppColors.accent,
-                                        fontSize: 11.5,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-
-                      // CR-03 Metadata Auto-Detection Info (captured_at vs published_at, session)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: AppColors.background,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppColors.cardBorder),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.schedule_rounded, color: AppColors.accent, size: 15),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    '촬영 시각: ${ApiService.formatPublishedDateTime((_captureStartTime ?? DateTime.now()).toUtc().toIso8601String())} · 게시 시각 별도 기록',
-                                    style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            Row(
-                              children: [
-                                const Icon(Icons.subtitles_outlined, color: AppColors.accent, size: 15),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    '자막: 현장 음성에서 원문 자막 자동 생성 · 세션 $_captureSessionId',
-                                    style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
+                      ],
+                      const SizedBox(height: 18),
                     ],
 
                     // Spec #18 & #36: Upload Failure Banner with Retry Button
                     if (uploadError != null) ...[
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        margin: const EdgeInsets.only(bottom: 14),
                         decoration: BoxDecoration(
-                          color: AppColors.danger.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppColors.danger),
+                          color: AppColors.danger.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.danger.withOpacity(0.4)),
                         ),
                         child: Row(
                           children: [
@@ -1224,15 +1300,17 @@ class _CameraScreenState extends State<CameraScreen> {
                             Expanded(
                               child: Text(
                                 uploadError!,
-                                style: const TextStyle(color: Colors.white, fontSize: 12),
+                                style: const TextStyle(color: AppColors.danger, fontSize: 12.5),
                               ),
                             ),
-                            TextButton.icon(
+                            TextButton(
                               onPressed: isUploading ? null : executePublish,
-                              icon: const Icon(Icons.refresh, color: AppColors.accent, size: 16),
-                              label: const Text(
+                              child: const Text(
                                 '재시도',
-                                style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold),
+                                style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                           ],
@@ -1240,22 +1318,28 @@ class _CameraScreenState extends State<CameraScreen> {
                       ),
                     ],
 
-                    // Publish Action Button
+                    // Pill-shaped Full-Width Blue [ 게시하기 ] Button
                     SizedBox(
                       width: double.infinity,
-                      height: 48,
+                      height: 54,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primary,
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(27),
+                          ),
                         ),
                         onPressed: isUploading ? null : executePublish,
                         child: Text(
                           isUploading
                               ? '현장 영상 게시 중...'
                               : (uploadError != null ? '다시 게시하기' : '게시하기'),
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ),
@@ -1654,13 +1738,16 @@ class _CameraScreenState extends State<CameraScreen> {
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(22),
+            padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: AppColors.card,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.primary.withOpacity(0.5), width: 1.2),
-              boxShadow: const [
-                BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, 8)),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.18),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
+                ),
               ],
             ),
             child: Column(
@@ -1869,14 +1956,14 @@ class _CameraScreenState extends State<CameraScreen> {
               child: Icon(
                 _isFrontCamera ? Icons.camera_front_rounded : Icons.videocam_outlined,
                 size: 48,
-                color: _isRecording ? AppColors.danger : AppColors.accent,
+                color: _isRecording ? AppColors.danger : Colors.white,
               ),
             ),
             const SizedBox(height: 16),
             Text(
               _isRecording ? '실시간 현장 촬영 중...' : '현장 촬영 카메라',
               style: TextStyle(
-                color: _isRecording ? AppColors.danger : AppColors.textPrimary,
+                color: _isRecording ? AppColors.danger : Colors.white,
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
                 letterSpacing: 0.8,
@@ -1885,20 +1972,20 @@ class _CameraScreenState extends State<CameraScreen> {
             const SizedBox(height: 6),
             Text(
               '${_isFrontCamera ? '전면 카메라 모드' : '후면 광각 카메라 모드'} · 플래시 ${_isFlashOn ? '켜짐 ⚡' : '꺼짐'}',
-              style: const TextStyle(color: AppColors.accent, fontSize: 12.5, fontWeight: FontWeight.w600),
+              style: const TextStyle(color: Color(0xFF93C5FD), fontSize: 12.5, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
             const Text(
               '앱 내 카메라로만 직접 촬영 가능한 원테이크 · 60초 모드',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+              style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
             const SizedBox(height: 14),
             TextButton.icon(
               onPressed: () => setState(() => _useSimulationAfterDenied = false),
-              icon: const Icon(Icons.privacy_tip_outlined, size: 14, color: AppColors.textMuted),
+              icon: const Icon(Icons.privacy_tip_outlined, size: 14, color: Colors.white60),
               label: const Text(
                 '카메라 권한 안내 보기',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                style: TextStyle(color: Colors.white60, fontSize: 11),
               ),
             ),
           ],
