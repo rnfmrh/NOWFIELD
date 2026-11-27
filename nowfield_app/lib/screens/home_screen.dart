@@ -1285,6 +1285,7 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
       _videoController = controller;
       await controller.initialize();
       await controller.setLooping(true);
+      controller.addListener(_onVideoTick);
       await controller.play();
       if (mounted) {
         setState(() {
@@ -1297,7 +1298,15 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
     }
   }
 
+  void _onVideoTick() {
+    if (!mounted) return;
+    if (widget.videoData['subtitles_json'] != null) {
+      setState(() {});
+    }
+  }
+
   void _disposeVideoPlayer() {
+    _videoController?.removeListener(_onVideoTick);
     _videoController?.dispose();
     _videoController = null;
     _isVideoReady = false;
@@ -1361,17 +1370,52 @@ class _VideoFeedItemState extends State<VideoFeedItem> {
       (videoData['thumbnail_url'] ?? videoData['preview_url']) as String?,
     );
 
-    // Parse auto-subtitles if available
+    // Parse time-synced auto-subtitles & multi-language translations (Whisper AI / field captions)
     String rawCaption = subtitleRaw.isNotEmpty ? subtitleRaw : title;
+    Map<String, dynamic>? activeCue;
     if (videoData.containsKey('subtitles_json') && videoData['subtitles_json'] != null) {
       try {
         final decoded = json.decode(videoData['subtitles_json']);
         if (decoded is List && decoded.isNotEmpty) {
-          rawCaption = decoded[0]['text'] ?? rawCaption;
+          final currentSec = (_isVideoReady && _videoController != null)
+              ? _videoController!.value.position.inMilliseconds / 1000.0
+              : 0.0;
+          for (final item in decoded) {
+            if (item is Map) {
+              final s = (item['start'] is num) ? (item['start'] as num).toDouble() : 0.0;
+              final e = (item['end'] is num) ? (item['end'] as num).toDouble() : 60.0;
+              if (currentSec >= s && currentSec <= e) {
+                activeCue = Map<String, dynamic>.from(item);
+                break;
+              }
+            }
+          }
+          activeCue ??= decoded.first is Map ? Map<String, dynamic>.from(decoded.first as Map) : null;
+          if (activeCue != null) {
+            rawCaption = activeCue['text']?.toString() ?? rawCaption;
+          }
         }
       } catch (_) {}
     }
-    final String displaySubtitle = _translateCaptionText(rawCaption, _captionLang);
+
+    String displaySubtitle;
+    if (_captionLang == '꺼짐' || _captionLang == 'Off') {
+      displaySubtitle = '';
+    } else if ((_captionLang == '영어' || _captionLang == 'English') &&
+        activeCue != null &&
+        activeCue['en']?.toString().trim().isNotEmpty == true) {
+      displaySubtitle = activeCue['en'].toString().trim();
+    } else if ((_captionLang == '일본어' || _captionLang == '日本語') &&
+        activeCue != null &&
+        activeCue['ja']?.toString().trim().isNotEmpty == true) {
+      displaySubtitle = activeCue['ja'].toString().trim();
+    } else if ((_captionLang == '한국어') &&
+        activeCue != null &&
+        activeCue['ko']?.toString().trim().isNotEmpty == true) {
+      displaySubtitle = activeCue['ko'].toString().trim();
+    } else {
+      displaySubtitle = _translateCaptionText(rawCaption, _captionLang);
+    }
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,

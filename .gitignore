@@ -38,5 +38,6 @@ Thumbs.db
 
 # Uploads & Local Config
 nowfield_backend/uploads/
+nowfield_backend/models/
 nowfield_backend/admin_settings.json
 nowfield_app/backend/

@@ -383,11 +383,12 @@ async def upload_video_file(
     """
     clean_title = title.strip()[:100]
 
-    banned_keywords = ["성인물", "음란물", "불법촬영", "포르노", "nsfw_ban_test"]
-    if any(kw in clean_title.lower() for kw in banned_keywords):
+    # Step 1 Safety Filter: Title & Evasion Pattern Check
+    matched_kw = VideoProcessor.check_text_policy_violation(f"{clean_title} {subtitle or ''}")
+    if matched_kw:
         raise HTTPException(
             status_code=451,
-            detail="POLICY_VIOLATION_SEXUAL_CONTENT: This video violates NOWFIELD's Content Policy.",
+            detail=f"POLICY_VIOLATION_SEXUAL_CONTENT: Prohibited content detected ({matched_kw}).",
         )
 
     file_id, raw_path, sha256_hash, file_size = await VideoProcessor.save_raw_video(video_file)
@@ -409,11 +410,36 @@ async def upload_video_file(
     )
 
     processed_path, video_url = VideoProcessor.transcode_to_faststart(raw_path, file_id)
+
+    # Step 2 Safety Filter: Visual Frame Inspection (FFmpeg keyframes -> NudeNet / YCbCr exposure detector)
+    is_frame_safe, frame_violation = VideoProcessor.inspect_video_frames_safety(
+        processed_path, file_id, float(effective_duration)
+    )
+    if not is_frame_safe:
+        if os.path.exists(processed_path):
+            os.remove(processed_path)
+        raise HTTPException(
+            status_code=451,
+            detail=f"POLICY_VIOLATION_VISUAL_CONTENT: {frame_violation}",
+        )
+
     thumb_url = VideoProcessor.generate_thumbnail(processed_path, file_id)
     preview_url = VideoProcessor.generate_preview_gif(processed_path, file_id)
     audio_url, subtitles_json = VideoProcessor.extract_audio_and_generate_subtitles(
         processed_path, file_id, clean_title, subtitle, float(effective_duration)
     )
+
+    # Step 3 Safety Filter: Transcribed Audio Speech Check
+    if subtitles_json:
+        speech_violation = VideoProcessor.check_text_policy_violation(subtitles_json)
+        if speech_violation:
+            for p in (processed_path,):
+                if p and os.path.exists(p):
+                    os.remove(p)
+            raise HTTPException(
+                status_code=451,
+                detail=f"POLICY_VIOLATION_AUDIO_SPEECH: Prohibited speech detected ({speech_violation}).",
+            )
 
     if location_name and location_name.strip() and not ("," in location_name or location_name.startswith("위도")):
         resolved_location_name = location_name.strip()

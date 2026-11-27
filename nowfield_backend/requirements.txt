@@ -7,3 +7,7 @@ sqlalchemy>=2.0.0
 python-multipart>=0.0.18
 pymysql>=1.1.0
 cryptography>=42.0.0
+faster-whisper>=1.1.0
+deep-translator>=1.11.4
+nudenet>=3.4.2
+pillow>=10.0.0
